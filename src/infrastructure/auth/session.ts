@@ -41,7 +41,7 @@ export async function requireSession(): Promise<Actor> {
 
 export async function requireOperator(): Promise<Actor> {
   const actor = await requireSession();
-  if (actor.role !== "operator") {
+  if (!hasRole(actor, "operator")) {
     throw new AppError(
       "FORBIDDEN",
       "This workspace is only available to Maya's operator account.",
@@ -55,7 +55,7 @@ export async function requireOperator(): Promise<Actor> {
 export async function requireRolePage(role: ActorRole) {
   const actor = await getSessionActor();
   if (!actor) redirect(`/sign-in?next=${role === "operator" ? "/app" : "/"}`);
-  if (actor.role !== role) redirect("/access-denied");
+  if (!hasRole(actor, role)) redirect("/access-denied");
   return actor;
 }
 

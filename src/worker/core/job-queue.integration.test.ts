@@ -59,6 +59,28 @@ describe.runIf(runDatabaseTests)("PostgreSQL job leasing", () => {
     expect(completed.status).toBe("completed");
   });
 
+  it("dead-letters an expired lease after the final attempt", async () => {
+    const enqueued = await enqueueJob({
+      type: "platform_smoke_test",
+      deduplicationKey: "exhausted-lease",
+      payloadJson: { smoke: true },
+      maxAttempts: 1
+    });
+    await claimNextJob("worker-final", 30_000);
+    await getDb()
+      .update(jobs)
+      .set({ lockedUntil: new Date(Date.now() - 1_000) })
+      .where(eq(jobs.id, enqueued.id));
+
+    expect(await claimNextJob("worker-next", 30_000)).toBeNull();
+    const [dead] = await getDb()
+      .select({ status: jobs.status, lastError: jobs.lastError })
+      .from(jobs)
+      .where(eq(jobs.id, enqueued.id));
+    expect(dead.status).toBe("dead");
+    expect(dead.lastError).toMatch(/final allowed attempt/);
+  });
+
   it("rejects conflicting reuse of a deduplication key", async () => {
     await enqueueJob({
       type: "platform_smoke_test",

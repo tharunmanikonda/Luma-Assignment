@@ -46,7 +46,9 @@ key with a different job type or payload is rejected. Workers claim jobs through
 `claimNextJob()`, which uses PostgreSQL row locking and skip-locked leasing so
 concurrent workers do not receive the same ready job. Completion, lease renewal,
 retry, and dead-letter transitions require the current worker's unexpired lease;
-failures use bounded exponential backoff until `maxAttempts` is reached.
+failures use bounded exponential backoff until `maxAttempts` is reached. If a
+worker crashes during its final attempt, the next queue poll dead-letters the
+expired job instead of leaving it permanently running.
 
 Initial job types are already registered for CSV parsing, source ingestion, generation submission/polling/output persistence, export bundles, and a platform smoke test.
 

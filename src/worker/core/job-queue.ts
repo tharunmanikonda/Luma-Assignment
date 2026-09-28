@@ -78,6 +78,24 @@ export async function claimNextJob(
   workerId: string,
   leaseMs = 30_000
 ): Promise<ClaimedJob | null> {
+  await getDb()
+    .update(jobs)
+    .set({
+      status: "dead",
+      lastError: "Job lease expired after the final allowed attempt.",
+      lockedAt: null,
+      lockedUntil: null,
+      lockedBy: null,
+      updatedAt: new Date()
+    })
+    .where(
+      and(
+        eq(jobs.status, "running"),
+        sql`${jobs.lockedUntil} < now()`,
+        sql`${jobs.attemptCount} >= ${jobs.maxAttempts}`
+      )
+    );
+
   const result = await getDb().execute(sql`
     update ${jobs}
     set
