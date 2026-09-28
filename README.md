@@ -1,5 +1,35 @@
 # Luma Take-Home — Forward Deployed Engineer
 
+## Local Platform Setup
+
+Task 01 has created the application foundation. To run it locally:
+
+```bash
+npm install
+cp .env.example .env.local
+docker compose up -d postgres
+npm run db:migrate
+npm run seed:demo
+npm run dev
+```
+
+Open `http://localhost:3000/sign-in` and use the fake local demo accounts from `.env.local`.
+
+Useful checks:
+
+```bash
+npm run format
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+npm run worker
+```
+
+More implementation notes live in `docs/platform-foundation.md`.
+
+---
+
 Modern engineering is about directing leverage — tools, judgment, taste — toward real outcomes. This take-home is designed around that.
 
 There's one problem, and it isn't yours — it's a customer's. That's the job. You have \~1 working day.
@@ -24,7 +54,7 @@ A six-person home-goods brand sells about 300 products through their own site. E
 
 That's the process — Google Docs/Sheets, Slack, and Gmail are the whole toolkit. "Done," for a request, means **2–3 approved images matching the shot idea**, in the drive folder, on the product page. Nobody can tell you today which of the sixteen requests are done.
 
-Maya (the founder) exported the sheet and sent it over — *"this is where we are as of today"* — and that export is in this repo.
+Maya (the founder) exported the sheet and sent it over — _"this is where we are as of today"_ — and that export is in this repo.
 
 Last quarter they trialed a creative-automation tool with a beautiful dashboard. Nobody logged in after week one. When Maya brought up trying AI generation, Ellie's answer was: **"Fine — but it has to work from my phone, and I don't want to install anything new."**
 
@@ -56,7 +86,7 @@ You can't interview Ellie. Where the brief is silent, make an assumption, write 
 
 We want real, working software — not a prototype, not a toy. You'll focus on a slice of this, but the slice should actually work and be something you'd put in front of this team on Monday. The AI writes the code; you own the decisions.
 
-There is no single intended design here — several shapes can work, and they trade different things away. We're evaluating whether the shape you chose fits *this team*, and whether you can name what it costs: what it trades away, and what you'd watch for after it ships.
+There is no single intended design here — several shapes can work, and they trade different things away. We're evaluating whether the shape you chose fits _this team_, and whether you can name what it costs: what it trades away, and what you'd watch for after it ships.
 
 - **Product judgment inside someone else's constraints** — an experience this team would actually adopt, given what they told you and what they rejected
 - **Clarify before solutioning** — the questions you'd ask, the assumptions you chose, and how they shaped what you built
