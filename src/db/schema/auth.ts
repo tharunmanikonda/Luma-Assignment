@@ -1,5 +1,8 @@
 import {
+  bigint,
+  boolean,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -14,7 +17,7 @@ export const users = pgTable(
     id: varchar("id", { length: 40 }).primaryKey(),
     name: text("name").notNull(),
     email: text("email").notNull(),
-    emailVerified: timestamp("email_verified", { withTimezone: true }),
+    emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
     displayName: text("display_name").notNull(),
     role: userRoleEnum("role").notNull(),
@@ -57,7 +60,6 @@ export const accounts = pgTable(
     }),
     scope: text("scope"),
     password: text("password"),
-    passwordHash: text("password_hash"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -79,7 +81,6 @@ export const sessions = pgTable(
   {
     id: varchar("id", { length: 40 }).primaryKey(),
     token: text("token").notNull(),
-    tokenHash: text("token_hash"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
@@ -95,32 +96,37 @@ export const sessions = pgTable(
   },
   (table) => ({
     tokenUnique: unique("session_token_unique").on(table.token),
-    tokenHashUnique: unique("session_token_hash_unique").on(table.tokenHash),
     userIdx: index("session_user_idx").on(table.userId),
     expiryIdx: index("session_expires_at_idx").on(table.expiresAt)
   })
 );
 
-export const verifications = pgTable("verification", {
-  id: varchar("id", { length: 40 }).primaryKey(),
-  identifier: text("identifier").notNull(),
-  value: text("value").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-});
+export const verifications = pgTable(
+  "verification",
+  {
+    id: varchar("id", { length: 40 }).primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => ({
+    identifierIdx: index("verification_identifier_idx").on(table.identifier)
+  })
+);
 
 export const authRateLimits = pgTable(
   "auth_rate_limits",
   {
     id: varchar("id", { length: 40 }).primaryKey(),
     key: text("key").notNull(),
-    count: text("count").notNull(),
-    lastRequest: timestamp("last_request", { withTimezone: true }).notNull()
+    count: integer("count").notNull(),
+    lastRequest: bigint("last_request", { mode: "number" }).notNull()
   },
   (table) => ({
     keyUnique: unique("auth_rate_limits_key_unique").on(table.key)

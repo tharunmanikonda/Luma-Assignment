@@ -21,7 +21,8 @@ Feature tasks may import these modules but should not change their contracts wit
 3. Apply the reviewed migration with `npm run db:migrate`.
 4. Seed the two demo users with `npm run seed:demo`. The command never prints passwords.
 5. Run the app with `npm run dev`.
-6. Run one worker pass with `npm run worker`.
+6. Run the long-lived worker with `npm run worker`. Stop it with `Ctrl+C`; it
+   handles `SIGINT` and `SIGTERM` cleanly.
 
 The local sign-in page is `/sign-in`. Maya uses the operator account from `.env.local`; Ellie uses the approver account.
 
@@ -40,7 +41,12 @@ Use the `ObjectStore` interface for file bytes. The local adapter writes under `
 
 ## Worker Contract
 
-Use `enqueueJob()` with a logical deduplication key for durable work. Workers claim jobs through `claimNextJob()`, which uses PostgreSQL row locking and skip-locked leasing so concurrent workers do not receive the same ready job.
+Use `enqueueJob()` with a logical deduplication key for durable work. Reusing a
+key with a different job type or payload is rejected. Workers claim jobs through
+`claimNextJob()`, which uses PostgreSQL row locking and skip-locked leasing so
+concurrent workers do not receive the same ready job. Completion, lease renewal,
+retry, and dead-letter transitions require the current worker's unexpired lease;
+failures use bounded exponential backoff until `maxAttempts` is reached.
 
 Initial job types are already registered for CSV parsing, source ingestion, generation submission/polling/output persistence, export bundles, and a platform smoke test.
 

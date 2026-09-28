@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    fileParallelism: false,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"]
   },
   resolve: {

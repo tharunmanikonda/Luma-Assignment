@@ -16,7 +16,7 @@ const betterAuthSchema = {
   session: sessions,
   account: accounts,
   verification: verifications,
-  rateLimit: authRateLimits
+  auth_rate_limits: authRateLimits
 };
 
 export const auth = betterAuth({
@@ -31,6 +31,22 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     disableSignUp: true
+  },
+  rateLimit: {
+    enabled: true,
+    storage: "database",
+    modelName: "auth_rate_limits",
+    customRules: {
+      "/sign-in/email": {
+        window: 60,
+        max: 5
+      }
+    }
+  },
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-forwarded-for"]
+    }
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7,

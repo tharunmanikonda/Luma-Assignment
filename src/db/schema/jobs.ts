@@ -14,7 +14,7 @@ export const jobStatusEnum = pgEnum("job_status", [
   "queued",
   "running",
   "completed",
-  "failed"
+  "dead"
 ]);
 export const jobTypeEnum = pgEnum("job_type", [
   "parse_ingestion_batch",
@@ -38,6 +38,7 @@ export const jobs = pgTable(
       .notNull()
       .defaultNow(),
     attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     lockedBy: text("locked_by"),

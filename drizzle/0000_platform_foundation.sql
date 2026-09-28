@@ -1,6 +1,6 @@
 CREATE TYPE "public"."asset_kind" AS ENUM('catalog_upload', 'source_image', 'generated_image', 'approved_bundle');
 CREATE TYPE "public"."asset_status" AS ENUM('pending', 'ready', 'failed');
-CREATE TYPE "public"."job_status" AS ENUM('queued', 'running', 'completed', 'failed');
+CREATE TYPE "public"."job_status" AS ENUM('queued', 'running', 'completed', 'dead');
 CREATE TYPE "public"."job_type" AS ENUM('parse_ingestion_batch', 'ingest_source_asset', 'submit_generation', 'poll_generation', 'persist_generation_output', 'build_approved_bundle', 'platform_smoke_test');
 CREATE TYPE "public"."user_role" AS ENUM('operator', 'approver');
 
@@ -14,7 +14,7 @@ CREATE TABLE "user" (
   "id" varchar(40) PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
   "email" text NOT NULL,
-  "email_verified" timestamp with time zone,
+  "email_verified" boolean DEFAULT false NOT NULL,
   "image" text,
   "display_name" text NOT NULL,
   "role" "user_role" NOT NULL,
@@ -36,7 +36,6 @@ CREATE TABLE "account" (
   "refresh_token_expires_at" timestamp with time zone,
   "scope" text,
   "password" text,
-  "password_hash" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "account_provider_account_unique" UNIQUE("provider_id","account_id")
@@ -45,15 +44,13 @@ CREATE TABLE "account" (
 CREATE TABLE "session" (
   "id" varchar(40) PRIMARY KEY NOT NULL,
   "token" text NOT NULL,
-  "token_hash" text,
   "expires_at" timestamp with time zone NOT NULL,
   "ip_address" text,
   "user_agent" text,
   "user_id" varchar(40) NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-  CONSTRAINT "session_token_unique" UNIQUE("token"),
-  CONSTRAINT "session_token_hash_unique" UNIQUE("token_hash")
+  CONSTRAINT "session_token_unique" UNIQUE("token")
 );
 
 CREATE TABLE "verification" (
@@ -68,8 +65,8 @@ CREATE TABLE "verification" (
 CREATE TABLE "auth_rate_limits" (
   "id" varchar(40) PRIMARY KEY NOT NULL,
   "key" text NOT NULL,
-  "count" text NOT NULL,
-  "last_request" timestamp with time zone NOT NULL,
+  "count" integer NOT NULL,
+  "last_request" bigint NOT NULL,
   CONSTRAINT "auth_rate_limits_key_unique" UNIQUE("key")
 );
 
@@ -113,6 +110,7 @@ CREATE TABLE "jobs" (
   "status" "job_status" DEFAULT 'queued' NOT NULL,
   "run_after" timestamp with time zone DEFAULT now() NOT NULL,
   "attempt_count" integer DEFAULT 0 NOT NULL,
+  "max_attempts" integer DEFAULT 5 NOT NULL,
   "locked_at" timestamp with time zone,
   "locked_until" timestamp with time zone,
   "locked_by" text,
@@ -133,6 +131,7 @@ CREATE INDEX "user_workspace_role_idx" ON "user" USING btree ("workspace_id","ro
 CREATE INDEX "account_user_idx" ON "account" USING btree ("user_id");
 CREATE INDEX "session_user_idx" ON "session" USING btree ("user_id");
 CREATE INDEX "session_expires_at_idx" ON "session" USING btree ("expires_at");
+CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");
 CREATE INDEX "assets_workspace_kind_idx" ON "assets" USING btree ("workspace_id","kind");
 CREATE INDEX "activity_events_workspace_event_idx" ON "activity_events" USING btree ("workspace_id","created_at");
 CREATE INDEX "jobs_ready_idx" ON "jobs" USING btree ("status","run_after");
