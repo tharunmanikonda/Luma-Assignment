@@ -65,7 +65,8 @@ export const products = pgTable(
     ),
     workspaceUpdatedIdx: index("products_workspace_updated_idx").on(
       table.workspaceId,
-      table.updatedAt
+      table.updatedAt,
+      table.id
     ),
     targetCheck: check(
       "products_target_approved_images_check",
@@ -99,7 +100,8 @@ export const sceneBriefs = pgTable(
     ),
     productCreatedIdx: index("scene_briefs_product_created_idx").on(
       table.productId,
-      table.createdAt
+      table.createdAt,
+      table.id
     )
   })
 );

@@ -4,16 +4,31 @@ import { closeDb } from "@/db/client";
 import {
   claimNextJob,
   completeJob,
+  renewLease,
   rescheduleJob,
   type ClaimedJob
 } from "./core/job-queue";
 import { handleGenerationJob } from "./generation-handlers";
+import {
+  handleIngestionJob,
+  isIngestionJob
+} from "@/modules/ingestion/worker-handlers";
+import { generationLeaseMs, withLeaseHeartbeat } from "./lease-heartbeat";
 
 const idlePollMs = 1_000;
 const maxBackoffMs = 30_000;
 
 async function handleJob(job: ClaimedJob, workerId: string) {
   if (job.type === "platform_smoke_test") {
+    await completeJob(job.id, workerId);
+    return;
+  }
+
+  if (isIngestionJob(job)) {
+    await withLeaseHeartbeat(
+      () => handleIngestionJob(job),
+      () => renewLease(job.id, workerId, generationLeaseMs)
+    );
     await completeJob(job.id, workerId);
     return;
   }

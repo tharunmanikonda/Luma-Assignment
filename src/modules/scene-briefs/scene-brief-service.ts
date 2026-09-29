@@ -2,6 +2,7 @@ import { and, eq, max } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { activityEvents } from "@/db/schema";
 import { products, sceneBriefs } from "@/modules/catalog/schema";
+import { reviewRequests } from "@/modules/reviews/schema";
 import { AppError } from "@/shared/errors";
 import { newId } from "@/shared/ids";
 
@@ -42,15 +43,6 @@ export async function saveSceneBrief(input: {
   basedOnReviewId?: string | null;
 }) {
   const scene = validateSceneText(input.scene);
-  if (input.basedOnReviewId) {
-    throw new AppError(
-      "VALIDATION_FAILED",
-      "This review is not available for a catalog-only revision.",
-      422,
-      false,
-      { basedOnReviewId: "Choose a changes-requested review for this product." }
-    );
-  }
 
   return getDb().transaction(async (tx) => {
     const [product] = await tx
@@ -68,6 +60,33 @@ export async function saveSceneBrief(input: {
       .for("update")
       .limit(1);
     if (!product) throw new AppError("NOT_FOUND", "Product not found.", 404);
+
+    if (input.basedOnReviewId) {
+      const [review] = await tx
+        .select({ id: reviewRequests.id })
+        .from(reviewRequests)
+        .where(
+          and(
+            eq(reviewRequests.id, input.basedOnReviewId),
+            eq(reviewRequests.workspaceId, input.actor.workspaceId),
+            eq(reviewRequests.productId, product.id),
+            eq(reviewRequests.state, "changes_requested")
+          )
+        )
+        .limit(1);
+      if (!review) {
+        throw new AppError(
+          "VALIDATION_FAILED",
+          "This review cannot start a revision.",
+          422,
+          false,
+          {
+            basedOnReviewId:
+              "Choose a changes-requested review for this product."
+          }
+        );
+      }
+    }
 
     if (product.currentSceneBriefId) {
       const [current] = await tx
@@ -90,7 +109,8 @@ export async function saveSceneBrief(input: {
         productId: product.id,
         version: (latest?.version ?? 0) + 1,
         text: scene,
-        source: "maya_edited",
+        source: input.basedOnReviewId ? "revision_feedback" : "maya_edited",
+        basedOnReviewId: input.basedOnReviewId ?? null,
         createdBy: input.actor.id
       })
       .returning();

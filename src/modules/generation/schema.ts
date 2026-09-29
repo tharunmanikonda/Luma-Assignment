@@ -9,7 +9,9 @@ import {
   unique,
   varchar
 } from "drizzle-orm/pg-core";
-import { assets, users, workspaces } from "@/db/schema";
+import { users } from "@/db/schema/auth";
+import { assets, workspaces } from "@/db/schema/core";
+import { products, sceneBriefs } from "@/modules/catalog/schema";
 import type { GenerationFailure } from "./domain";
 
 export const generationAttemptStatusEnum = pgEnum("generation_attempt_status", [
@@ -30,12 +32,16 @@ export const generationAttempts = pgTable(
     workspaceId: varchar("workspace_id", { length: 32 })
       .notNull()
       .references(() => workspaces.id, { onDelete: "restrict" }),
-    productId: varchar("product_id", { length: 40 }).notNull(),
+    productId: varchar("product_id", { length: 40 })
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
     attemptNumber: integer("attempt_number").notNull(),
     sourceAssetId: varchar("source_asset_id", { length: 40 })
       .notNull()
       .references(() => assets.id, { onDelete: "restrict" }),
-    sceneBriefId: varchar("scene_brief_id", { length: 40 }).notNull(),
+    sceneBriefId: varchar("scene_brief_id", { length: 40 })
+      .notNull()
+      .references(() => sceneBriefs.id, { onDelete: "restrict" }),
     sceneBriefVersion: integer("scene_brief_version").notNull(),
     promptText: text("prompt_text").notNull(),
     promptTemplateVersion: text("prompt_template_version").notNull(),
@@ -82,7 +88,8 @@ export const generationAttempts = pgTable(
     ).on(table.providerGenerationId),
     productHistoryIdx: index("generation_attempt_product_history_idx").on(
       table.productId,
-      table.createdAt
+      table.attemptNumber,
+      table.id
     ),
     workspaceStatusIdx: index("generation_attempt_workspace_status_idx").on(
       table.workspaceId,

@@ -2,9 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getPool } from "@/db/client";
 import { PostgresReviewStore } from "./store";
 
-const runReviewDatabaseTests =
-  process.env.RUN_DATABASE_TESTS === "true" &&
-  process.env.RUN_REVIEW_DATABASE_TESTS === "true";
+const runReviewDatabaseTests = process.env.RUN_DATABASE_TESTS === "true";
 
 describe.runIf(runReviewDatabaseTests)(
   "PostgreSQL review decision concurrency",
@@ -16,6 +14,15 @@ describe.runIf(runReviewDatabaseTests)(
       );
       await pool.query(
         `delete from review_requests where workspace_id = 'ws_review_test'`
+      );
+      await pool.query(
+        `delete from generation_attempts where workspace_id = 'ws_review_test'`
+      );
+      await pool.query(
+        `delete from scene_briefs where product_id = 'product_review_test'`
+      );
+      await pool.query(
+        `delete from products where workspace_id = 'ws_review_test'`
       );
       await pool.query(
         `delete from assets where workspace_id = 'ws_review_test'`
@@ -41,6 +48,32 @@ describe.runIf(runReviewDatabaseTests)(
          values
           ('asset_review_source', 'ws_review_test', 'source_image', 'test/source.webp', 'image/webp', 'ready'),
           ('asset_review_candidate', 'ws_review_test', 'generated_image', 'test/candidate.webp', 'image/webp', 'ready')`
+      );
+      await pool.query(
+        `insert into products (id, workspace_id, sku, name)
+         values ('product_review_test', 'ws_review_test', 'HG-002', 'Stoneware Mug')`
+      );
+      await pool.query(
+        `insert into scene_briefs
+          (id, product_id, version, text, source, created_by)
+         values
+          ('scene_review_test', 'product_review_test', 1, 'Soft window light', 'maya_edited', 'usr_review_operator')`
+      );
+      await pool.query(
+        `insert into generation_attempts (
+           id, workspace_id, product_id, attempt_number, source_asset_id,
+           scene_brief_id, scene_brief_version, prompt_text,
+           prompt_template_version, provider, model, request_type, status,
+           idempotency_key, request_fingerprint, quote_fingerprint,
+           pricing_version, estimated_price_micros, output_asset_id, created_by
+         ) values (
+           'attempt_concurrency', 'ws_review_test', 'product_review_test', 1,
+           'asset_review_source', 'scene_review_test', 1, 'Soft window light',
+           'test-v1', 'fake', 'fake-image', 'image', 'succeeded',
+           'generation-concurrency-key', 'request-fingerprint',
+           'quote-fingerprint', 'test-pricing-v1', 1000,
+           'asset_review_candidate', 'usr_review_operator'
+         )`
       );
       await pool.query(
         `insert into review_requests (

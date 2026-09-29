@@ -10,7 +10,10 @@ import {
   unique,
   varchar
 } from "drizzle-orm/pg-core";
-import { assets, users, workspaces } from "@/db/schema";
+import { users } from "@/db/schema/auth";
+import { assets, workspaces } from "@/db/schema/core";
+import { products } from "@/modules/catalog/schema";
+import { generationAttempts } from "@/modules/generation/schema";
 
 export const reviewStateEnum = pgEnum("review_state", [
   "pending",
@@ -25,11 +28,15 @@ export const reviewRequests = pgTable(
     id: varchar("id", { length: 40 }).primaryKey(),
     generationAttemptId: varchar("generation_attempt_id", {
       length: 40
-    }).notNull(),
+    })
+      .notNull()
+      .references(() => generationAttempts.id, { onDelete: "restrict" }),
     workspaceId: varchar("workspace_id", { length: 32 })
       .notNull()
       .references(() => workspaces.id, { onDelete: "restrict" }),
-    productId: varchar("product_id", { length: 40 }).notNull(),
+    productId: varchar("product_id", { length: 40 })
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
     approverUserId: varchar("approver_user_id", { length: 40 })
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -74,7 +81,8 @@ export const reviewRequests = pgTable(
     ),
     productHistoryIdx: index("review_requests_product_history_idx").on(
       table.productId,
-      table.createdAt
+      table.createdAt,
+      table.id
     ),
     approverStateIdx: index("review_requests_approver_state_idx").on(
       table.approverUserId,
