@@ -1,34 +1,32 @@
-import { signOutAction } from "@/infrastructure/auth/sign-in";
-import { requireRolePage } from "@/infrastructure/auth/session";
+import { redirect } from "next/navigation";
+import { getSessionActor } from "@/infrastructure/auth/session";
+import { ReviewExperience } from "@/modules/reviews/components/review-experience";
+import { ReviewUnavailable } from "@/modules/reviews/components/review-unavailable";
+import { ReviewError } from "@/modules/reviews/errors";
+import { getReviewService } from "@/modules/reviews/service";
 
-export default async function ReviewPlaceholderPage({
+export default async function ReviewPage({
   params
 }: {
   params: Promise<{ reviewId: string }>;
 }) {
-  const actor = await requireRolePage("approver");
   const { reviewId } = await params;
+  const actor = await getSessionActor();
+  if (!actor) {
+    redirect(`/sign-in?next=/reviews/${encodeURIComponent(reviewId)}`);
+  }
+  if (actor.role !== "approver") redirect("/access-denied");
 
-  return (
-    <main className="shell">
-      <header className="topbar">
-        <div>
-          <div className="brand">Review</div>
-          <div className="muted">Signed in as {actor.displayName}</div>
-        </div>
-        <form action={signOutAction}>
-          <button className="button secondary" type="submit">
-            Sign out
-          </button>
-        </form>
-      </header>
-      <section className="card">
-        <h1>Review unavailable</h1>
-        <p className="muted">
-          Review {reviewId} will be loaded by Task 04 once immutable review
-          requests exist.
-        </p>
-      </section>
-    </main>
-  );
+  try {
+    const review = await getReviewService().readAssignedReview({
+      actor,
+      reviewId
+    });
+    return <ReviewExperience review={review} />;
+  } catch (error) {
+    if (error instanceof ReviewError && error.code === "NOT_FOUND") {
+      return <ReviewUnavailable />;
+    }
+    throw error;
+  }
 }
