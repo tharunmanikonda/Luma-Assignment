@@ -60,11 +60,18 @@ export class GenerationWorker {
       throw new Error("Generation source disappeared after authorization.");
 
     try {
-      const source = await this.objectStore.signedReadUrl(
+      const sourceObject = await this.objectStore.get(
         product.sourceAsset.objectKey
       );
+      if (!sourceObject)
+        throw new Error(
+          "Generation source bytes disappeared after authorization."
+        );
       const submitted = await this.gateway.submitImageEdit({
-        source,
+        source: {
+          data: Buffer.from(sourceObject.bytes).toString("base64"),
+          mediaType: sourceObject.contentType
+        },
         prompt: claimed.promptText,
         userId: claimed.workspaceId,
         idempotencyKey: claimed.id

@@ -9,11 +9,11 @@ import {
 export class HttpLumaGateway implements LumaGateway {
   constructor(
     private readonly apiKey: string,
-    private readonly baseUrl = "https://api.lumalabs.ai"
+    private readonly baseUrl = "https://agents.lumalabs.ai"
   ) {}
 
   async submitImageEdit(input: {
-    source: string;
+    source: { data: string; mediaType: string };
     prompt: string;
     userId: string;
     idempotencyKey: string;
@@ -22,11 +22,17 @@ export class HttpLumaGateway implements LumaGateway {
     try {
       response = await fetch(`${this.baseUrl}/v1/generations`, {
         method: "POST",
-        headers: this.headers(),
+        headers: {
+          ...this.headers(),
+          "x-request-id": input.idempotencyKey
+        },
         body: JSON.stringify({
           type: "image_edit",
           model: "uni-1",
-          source: input.source,
+          source: {
+            data: input.source.data,
+            media_type: input.source.mediaType
+          },
           prompt: input.prompt,
           user_id: input.userId
         })
@@ -60,14 +66,14 @@ export class HttpLumaGateway implements LumaGateway {
     const body = (await response.json()) as {
       id: string;
       state: LumaGenerationStatus["state"];
-      assets?: { image?: string };
+      output?: Array<{ url?: string }>;
       failure_code?: string;
       failure_reason?: string;
     };
     return {
       providerGenerationId: body.id,
       state: body.state,
-      outputUrl: body.assets?.image,
+      outputUrl: body.output?.[0]?.url,
       failureCode: body.failure_code,
       failureReason: body.failure_reason,
       requestId: response.headers.get("x-request-id") ?? undefined,

@@ -23,7 +23,7 @@ export class FakeLumaGateway implements LumaGateway {
   constructor(private readonly scenario: FakeLumaScenario = "success") {}
 
   async submitImageEdit(input: {
-    source: string;
+    source: { data: string; mediaType: string };
     prompt: string;
     userId: string;
     idempotencyKey: string;

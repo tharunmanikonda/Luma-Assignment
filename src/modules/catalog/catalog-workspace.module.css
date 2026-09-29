@@ -440,6 +440,7 @@
 .panelSection,
 .confirmBand,
 .sceneEditor,
+.generationPanel,
 .notes,
 .approvedImages,
 .timeline {
@@ -449,6 +450,7 @@
 
 .panelSection h3,
 .sceneEditor h3,
+.generationPanel h3,
 .notes h3,
 .approvedImages h3,
 .timeline h3 {
@@ -649,6 +651,41 @@
 .sceneFooter span {
   color: #68736f;
   font-size: 12px;
+}
+
+.generationPanel {
+  display: grid;
+  gap: 16px;
+}
+
+.generationPanel > .primaryButton {
+  justify-self: start;
+}
+
+.quoteConfirmation,
+.generationStatus {
+  border: 1px solid #bdc8c2;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.quoteConfirmation > div:first-child {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.quoteConfirmation span,
+.quoteConfirmation p,
+.generationStatus p {
+  color: #5f6c67;
+  font-size: 13px;
+  margin: 0;
+}
+
+.quoteConfirmation strong {
+  font-size: 20px;
 }
 
 .approvedGrid {

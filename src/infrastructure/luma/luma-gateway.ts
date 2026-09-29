@@ -17,7 +17,7 @@ export interface LumaOutput {
 }
 export interface LumaGateway {
   submitImageEdit(input: {
-    source: string;
+    source: { data: string; mediaType: string };
     prompt: string;
     userId: string;
     idempotencyKey: string;

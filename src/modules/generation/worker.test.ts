@@ -51,6 +51,11 @@ async function setup(
   });
   const gateway = new FakeLumaGateway(scenario);
   const store = new MemoryObjectStore();
+  store.objects.set("sources/vase.png", {
+    key: "sources/vase.png",
+    bytes: new TextEncoder().encode("source-image"),
+    contentType: "image/png"
+  });
   return {
     repository,
     gateway,
@@ -76,7 +81,10 @@ describe("generation worker", () => {
       providerOutputUrl: null,
       outputAssetId: "asset_1"
     });
-    expect(store.objects.size).toBe(1);
+    expect(store.objects.size).toBe(2);
+    expect(
+      [...store.objects.keys()].some((key) => key.includes(attempt.id))
+    ).toBe(true);
   });
 
   it("never resubmits an unknown provider acceptance", async () => {
@@ -145,6 +153,6 @@ describe("generation worker", () => {
       `fake-output://fake_${attempt.id}/expired`,
       `fake-output://fake_${attempt.id}/fresh`
     ]);
-    expect(store.objects.size).toBe(1);
+    expect(store.objects.size).toBe(2);
   });
 });

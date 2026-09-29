@@ -41,8 +41,10 @@ type ProductDetail = {
   currency: string;
   notes: string | null;
   sourceStatus: "pending" | "ready" | "failed" | null;
+  sourceAssetId: string | null;
   sourceUrl: string | null;
   sourceFailure: unknown;
+  sceneBriefId: string | null;
   sceneText: string | null;
   sceneVersion: number | null;
   statusLabel: string;
@@ -55,6 +57,35 @@ type ProductDetail = {
     decidedAt: string | null;
   }>;
   history: Array<{ id: string; type: string; createdAt: string }>;
+};
+
+type GenerationQuote = {
+  productId: string;
+  sourceAssetId: string;
+  sceneBriefId: string;
+  estimatedAmount: string;
+  currency: "USD";
+  pricingVersion: string;
+  quoteFingerprint: string;
+};
+
+type GenerationAttempt = {
+  id: string;
+  status:
+    | "pending"
+    | "submitting"
+    | "queued"
+    | "processing"
+    | "storing"
+    | "succeeded"
+    | "failed"
+    | "reconciliation_required";
+  customerState: {
+    label: string;
+    terminal: boolean;
+    nextAction: string | null;
+  };
+  failure: { message: string } | null;
 };
 
 type PreviewItem = {
@@ -389,23 +420,67 @@ function ProductPanel({
   const [scene, setScene] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [quote, setQuote] = useState<GenerationQuote | null>(null);
+  const [attempt, setAttempt] = useState<GenerationAttempt | null>(null);
+  const [generationBusy, setGenerationBusy] = useState(false);
+  const [generationMessage, setGenerationMessage] = useState<string | null>(
+    null
+  );
+  const generationKey = useRef(crypto.randomUUID());
 
-  const load = useCallback(async () => {
-    setMessage(null);
-    try {
-      const next = await readJson<ProductDetail>(
-        await fetch(`/api/products/${productId}`, { cache: "no-store" })
-      );
-      setProduct(next);
-      setScene(next.sceneText ?? "");
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Product could not be loaded."
-      );
-    }
-  }, [productId]);
+  const load = useCallback(
+    async (clearMessage = true) => {
+      if (clearMessage) setMessage(null);
+      try {
+        const next = await readJson<ProductDetail>(
+          await fetch(`/api/products/${productId}`, { cache: "no-store" })
+        );
+        setProduct(next);
+        setScene(next.sceneText ?? "");
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Product could not be loaded."
+        );
+      }
+    },
+    [productId]
+  );
 
   useEffect(() => void load(), [load]);
+
+  useEffect(() => {
+    setQuote(null);
+    setAttempt(null);
+    setGenerationMessage(null);
+    generationKey.current = crypto.randomUUID();
+  }, [productId]);
+
+  useEffect(() => {
+    if (!attempt || attempt.customerState.terminal) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await readJson<{ attempt: GenerationAttempt }>(
+          await fetch(`/api/generation-attempts/${attempt.id}`, {
+            cache: "no-store"
+          })
+        );
+        setAttempt(next.attempt);
+        if (next.attempt.customerState.terminal) {
+          await load(false);
+          onSaved();
+        }
+      } catch (error) {
+        setGenerationMessage(
+          error instanceof Error
+            ? error.message
+            : "Generation status could not be refreshed."
+        );
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [attempt, load, onSaved]);
 
   async function save() {
     setBusy(true);
@@ -418,8 +493,12 @@ function ProductPanel({
           body: JSON.stringify({ scene, basedOnReviewId: null })
         })
       );
+      setQuote(null);
+      setAttempt(null);
+      setGenerationMessage(null);
+      generationKey.current = crypto.randomUUID();
+      await load(false);
       setMessage("Scene saved. No image was created and no budget was used.");
-      await load();
       onSaved();
     } catch (error) {
       setMessage(
@@ -427,6 +506,76 @@ function ProductPanel({
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function reviewQuote() {
+    if (!product?.sourceAssetId || !product.sceneBriefId) return;
+    setGenerationBusy(true);
+    setGenerationMessage(null);
+    try {
+      const params = new URLSearchParams({
+        sourceAssetId: product.sourceAssetId,
+        sceneBriefId: product.sceneBriefId
+      });
+      const result = await readJson<
+        | { ready: true; quote: GenerationQuote }
+        | { ready: false; blockers: Array<{ message: string }> }
+      >(
+        await fetch(
+          `/api/products/${productId}/generation-quote?${params.toString()}`,
+          { cache: "no-store" }
+        )
+      );
+      if (!result.ready) {
+        setGenerationMessage(
+          result.blockers[0]?.message ?? "This product is not ready."
+        );
+        return;
+      }
+      setQuote(result.quote);
+    } catch (error) {
+      setGenerationMessage(
+        error instanceof Error ? error.message : "Quote could not be loaded."
+      );
+    } finally {
+      setGenerationBusy(false);
+    }
+  }
+
+  async function confirmGeneration() {
+    if (!quote) return;
+    setGenerationBusy(true);
+    setGenerationMessage(null);
+    try {
+      const result = await readJson<{ attempt: GenerationAttempt }>(
+        await fetch(`/api/products/${productId}/generation-attempts`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "Idempotency-Key": generationKey.current
+          },
+          body: JSON.stringify({
+            sourceAssetId: quote.sourceAssetId,
+            sceneBriefId: quote.sceneBriefId,
+            pricingVersion: quote.pricingVersion,
+            quoteFingerprint: quote.quoteFingerprint
+          })
+        })
+      );
+      setAttempt(result.attempt);
+      setQuote(null);
+      setGenerationMessage(
+        "Generation confirmed. The worker is preparing your image."
+      );
+    } catch (error) {
+      setGenerationMessage(
+        error instanceof Error
+          ? error.message
+          : "Generation could not be confirmed."
+      );
+    } finally {
+      setGenerationBusy(false);
     }
   }
 
@@ -511,6 +660,83 @@ function ProductPanel({
                 }
               >
                 {message}
+              </p>
+            ) : null}
+          </section>
+          <section className={styles.generationPanel}>
+            <div>
+              <p className={styles.eyebrow}>Image generation</p>
+              <h3>Create one candidate</h3>
+            </div>
+            {!product.readyToGenerate ? (
+              <p className={styles.notice}>
+                A ready source photo and saved scene are required.
+              </p>
+            ) : attempt ? (
+              <div className={styles.generationStatus}>
+                <strong>{attempt.customerState.label}</strong>
+                <p>
+                  {attempt.customerState.nextAction ??
+                    (attempt.customerState.terminal
+                      ? "The generation attempt is complete."
+                      : "You can leave this panel open while the worker runs.")}
+                </p>
+              </div>
+            ) : quote ? (
+              <div className={styles.quoteConfirmation}>
+                <div>
+                  <span>Estimated cost</span>
+                  <strong>
+                    {new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: quote.currency,
+                      minimumFractionDigits: 4
+                    }).format(Number(quote.estimatedAmount))}
+                  </strong>
+                </div>
+                <p>
+                  Confirming creates one paid Luma generation. Repeated clicks
+                  use the same request key.
+                </p>
+                <div className={styles.actions}>
+                  <button
+                    className={styles.primaryButton}
+                    onClick={confirmGeneration}
+                    disabled={generationBusy}
+                  >
+                    {generationBusy
+                      ? "Confirming..."
+                      : `Confirm ${quote.estimatedAmount} ${quote.currency} generation`}
+                  </button>
+                  <button
+                    className={styles.secondaryButton}
+                    onClick={() => setQuote(null)}
+                    disabled={generationBusy}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className={styles.primaryButton}
+                onClick={reviewQuote}
+                disabled={generationBusy}
+              >
+                {generationBusy
+                  ? "Loading quote..."
+                  : "Review generation quote"}
+              </button>
+            )}
+            {generationMessage ? (
+              <p
+                className={
+                  attempt && attempt.status !== "failed"
+                    ? styles.success
+                    : styles.error
+                }
+              >
+                {generationMessage}
               </p>
             ) : null}
           </section>
