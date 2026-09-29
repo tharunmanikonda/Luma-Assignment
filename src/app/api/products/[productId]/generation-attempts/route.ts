@@ -18,7 +18,7 @@ const bodySchema = z.object({
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ productId: string }> }
 ) {
   return generationApi(async () => {
     const actor = await requireOperator();
@@ -36,10 +36,10 @@ export async function POST(
         "Review the generation details and try again.",
         422
       );
-    const { id } = await params;
+    const { productId } = await params;
     const result = await getGenerationService().authorize({
       workspaceId: actor.workspaceId,
-      productId: id,
+      productId,
       actorId: actor.id,
       idempotencyKey,
       ...parsed.data
@@ -53,14 +53,14 @@ export async function POST(
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ productId: string }> }
 ) {
   return generationApi(async () => {
     const actor = await requireOperator();
-    const { id } = await params;
+    const { productId } = await params;
     const attempts = await getGenerationRepository().listAttempts(
       actor.workspaceId,
-      id
+      productId
     );
     const estimatedPriceMicros = attempts.reduce(
       (sum, attempt) => sum + attempt.estimatedPriceMicros,

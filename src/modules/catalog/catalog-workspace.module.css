@@ -83,6 +83,7 @@
 .panelSection h3,
 .sceneEditor h3,
 .notes h3,
+.approvedImages h3,
 .timeline h3 {
   letter-spacing: 0;
   margin: 0;
@@ -364,6 +365,19 @@
   justify-content: center;
   min-height: 40px;
   padding: 8px 14px;
+  text-decoration: none;
+}
+
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible,
+.productRow:focus-visible,
+.attentionRow:focus-visible,
+.tabs button:focus-visible,
+.textButton:focus-visible,
+.filters input:focus-visible,
+.sceneEditor textarea:focus-visible {
+  outline: 3px solid #8fb9aa;
+  outline-offset: 2px;
 }
 
 .primaryButton {
@@ -427,6 +441,7 @@
 .confirmBand,
 .sceneEditor,
 .notes,
+.approvedImages,
 .timeline {
   border-bottom: 1px solid #d8dfda;
   padding: 26px 0;
@@ -435,6 +450,7 @@
 .panelSection h3,
 .sceneEditor h3,
 .notes h3,
+.approvedImages h3,
 .timeline h3 {
   font-size: 18px;
 }
@@ -633,6 +649,37 @@
 .sceneFooter span {
   color: #68736f;
   font-size: 12px;
+}
+
+.approvedGrid {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.approvedGrid article {
+  align-items: center;
+  border: 1px solid #d8dfda;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 112px minmax(0, 1fr);
+  padding: 12px;
+}
+
+.approvedGrid img {
+  aspect-ratio: 1;
+  background: #eef1ed;
+  display: block;
+  object-fit: contain;
+  width: 100%;
+}
+
+.approvedGrid article > div {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
 }
 
 .timeline > div {

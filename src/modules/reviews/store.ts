@@ -430,7 +430,7 @@ export class PostgresReviewStore implements ReviewStore {
          ga.output_asset_id as "candidateAssetId",
          sb.text as "sceneDirection",
          sb.version as "sceneVersion",
-         coalesce(rr.state, 'not_sent') as state,
+         coalesce(rr.state::text, 'not_sent') as state,
          rr.feedback,
          rr.decided_at as "decidedAt",
          ga.created_at as "createdAt"

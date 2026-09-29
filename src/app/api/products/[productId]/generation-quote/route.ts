@@ -5,17 +5,17 @@ import { getGenerationService } from "@/modules/generation/runtime";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ productId: string }> }
 ) {
   return generationApi(async () => {
     const actor = await requireOperator();
-    const { id } = await params;
+    const { productId } = await params;
     const sourceAssetId =
       request.nextUrl.searchParams.get("sourceAssetId") ?? "";
     const sceneBriefId = request.nextUrl.searchParams.get("sceneBriefId") ?? "";
     const result = await getGenerationService().quote(
       actor.workspaceId,
-      id,
+      productId,
       sourceAssetId,
       sceneBriefId
     );

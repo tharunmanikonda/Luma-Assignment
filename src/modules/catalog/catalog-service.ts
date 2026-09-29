@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { activityEvents, assets } from "@/db/schema";
+import { reviewRequests } from "@/modules/reviews/schema";
 import { AppError } from "@/shared/errors";
 import { products, sceneBriefs } from "./schema";
 import {
@@ -244,22 +245,39 @@ export async function getProduct(input: {
     sourceStatus: row.sourceStatus,
     sceneText: row.sceneText
   });
-  const history = await db
-    .select({
-      id: activityEvents.id,
-      type: activityEvents.eventType,
-      data: activityEvents.eventDataJson,
-      createdAt: activityEvents.createdAt
-    })
-    .from(activityEvents)
-    .where(
-      and(
-        eq(activityEvents.workspaceId, input.actor.workspaceId),
-        eq(activityEvents.productId, input.productId)
+  const [history, approvedOutputs] = await Promise.all([
+    db
+      .select({
+        id: activityEvents.id,
+        type: activityEvents.eventType,
+        data: activityEvents.eventDataJson,
+        createdAt: activityEvents.createdAt
+      })
+      .from(activityEvents)
+      .where(
+        and(
+          eq(activityEvents.workspaceId, input.actor.workspaceId),
+          eq(activityEvents.productId, input.productId)
+        )
       )
-    )
-    .orderBy(desc(activityEvents.createdAt))
-    .limit(20);
+      .orderBy(desc(activityEvents.createdAt))
+      .limit(20),
+    db
+      .select({
+        assetId: reviewRequests.candidateAssetId,
+        attemptNumber: reviewRequests.attemptNumber,
+        decidedAt: reviewRequests.decidedAt
+      })
+      .from(reviewRequests)
+      .where(
+        and(
+          eq(reviewRequests.workspaceId, input.actor.workspaceId),
+          eq(reviewRequests.productId, input.productId),
+          eq(reviewRequests.state, "approved")
+        )
+      )
+      .orderBy(desc(reviewRequests.attemptNumber), desc(reviewRequests.id))
+  ]);
 
   return {
     ...row,
@@ -270,6 +288,12 @@ export async function getProduct(input: {
     readyToGenerate: status === "ready_to_generate",
     approvedCount: 0,
     attempts: 0,
+    approvedOutputs: approvedOutputs.map((output) => ({
+      ...output,
+      imageUrl: `/api/assets/${encodeURIComponent(output.assetId)}/content`,
+      downloadUrl: `/api/assets/${encodeURIComponent(output.assetId)}/download`,
+      decidedAt: output.decidedAt?.toISOString() ?? null
+    })),
     history: history.map((event) => ({
       ...event,
       createdAt: event.createdAt.toISOString()

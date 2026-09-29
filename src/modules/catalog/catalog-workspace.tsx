@@ -47,6 +47,13 @@ type ProductDetail = {
   sceneVersion: number | null;
   statusLabel: string;
   readyToGenerate: boolean;
+  approvedOutputs: Array<{
+    assetId: string;
+    attemptNumber: number;
+    imageUrl: string;
+    downloadUrl: string;
+    decidedAt: string | null;
+  }>;
   history: Array<{ id: string; type: string; createdAt: string }>;
 };
 
@@ -513,6 +520,35 @@ function ProductPanel({
               <p>{product.notes}</p>
             </section>
           ) : null}
+          {product.approvedOutputs.length ? (
+            <section className={styles.approvedImages}>
+              <div>
+                <p className={styles.eyebrow}>Approved delivery</p>
+                <h3>Approved images</h3>
+              </div>
+              <div className={styles.approvedGrid}>
+                {product.approvedOutputs.map((output) => (
+                  <article key={output.assetId}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={output.imageUrl}
+                      alt={`${product.name} approved image, candidate ${output.attemptNumber}`}
+                    />
+                    <div>
+                      <strong>Candidate {output.attemptNumber}</strong>
+                      <a
+                        className={styles.secondaryButton}
+                        href={output.downloadUrl}
+                        download
+                      >
+                        Download approved image
+                      </a>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <section className={styles.timeline}>
             <h3>History</h3>
             {product.history.length ? (
@@ -681,6 +717,13 @@ export function CatalogWorkspace({
           <span>Usage</span>
         </nav>
         <div className={styles.headerActions}>
+          <a
+            className={styles.secondaryButton}
+            href="/api/exports/catalog.csv"
+            download
+          >
+            Export catalog status
+          </a>
           <button
             className={styles.secondaryButton}
             onClick={() => setPanel({ type: "import" })}
