@@ -7,6 +7,7 @@ import {
   rescheduleJob,
   type ClaimedJob
 } from "./core/job-queue";
+import { handleGenerationJob } from "./generation-handlers";
 
 const idlePollMs = 1_000;
 const maxBackoffMs = 30_000;
@@ -16,6 +17,8 @@ async function handleJob(job: ClaimedJob, workerId: string) {
     await completeJob(job.id, workerId);
     return;
   }
+
+  if (await handleGenerationJob(job, workerId)) return;
 
   throw new Error(`No handler registered for ${job.type}`);
 }
