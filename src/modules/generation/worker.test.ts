@@ -120,4 +120,31 @@ describe("generation worker", () => {
     expect((await repository.getAttempt(attempt.id))?.status).toBe("storing");
     expect(gateway.submissions).toHaveLength(1);
   });
+
+  it("refreshes an expired output URL without resubmitting", async () => {
+    const { worker, repository, gateway, store, attempt } = await setup(
+      "expired_output_refresh"
+    );
+    await worker.submit(attempt.id);
+    await worker.poll(attempt.id, 0);
+    await worker.poll(attempt.id, 1);
+    expect(
+      (await repository.getAttempt(attempt.id))?.providerOutputUrl
+    ).toMatch(/\/expired$/);
+
+    await worker.persist(attempt.id);
+
+    expect(await repository.getAttempt(attempt.id)).toMatchObject({
+      status: "succeeded",
+      providerOutputUrl: null,
+      outputAssetId: "asset_1"
+    });
+    expect(gateway.polls).toHaveLength(3);
+    expect(gateway.submissions).toHaveLength(1);
+    expect(gateway.downloads).toEqual([
+      `fake-output://fake_${attempt.id}/expired`,
+      `fake-output://fake_${attempt.id}/fresh`
+    ]);
+    expect(store.objects.size).toBe(1);
+  });
 });

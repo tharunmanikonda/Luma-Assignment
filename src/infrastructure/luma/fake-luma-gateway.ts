@@ -11,11 +11,13 @@ export type FakeLumaScenario =
   | "accepted_failure"
   | "rate_limited"
   | "unknown_submission"
-  | "output_download_failure";
+  | "output_download_failure"
+  | "expired_output_refresh";
 
 export class FakeLumaGateway implements LumaGateway {
   readonly submissions: string[] = [];
   readonly polls: string[] = [];
+  readonly downloads: string[] = [];
   private pollCount = 0;
 
   constructor(private readonly scenario: FakeLumaScenario = "success") {}
@@ -74,13 +76,17 @@ export class FakeLumaGateway implements LumaGateway {
     return {
       providerGenerationId,
       state: "completed",
-      outputUrl: `fake-output://${providerGenerationId}`,
+      outputUrl:
+        this.scenario === "expired_output_refresh" && this.pollCount === 2
+          ? `fake-output://${providerGenerationId}/expired`
+          : `fake-output://${providerGenerationId}/fresh`,
       requestId: "fake_request_poll",
       apiVersion: "fake-v1"
     };
   }
 
-  async downloadOutput(): Promise<LumaOutput> {
+  async downloadOutput(outputUrl: string): Promise<LumaOutput> {
+    this.downloads.push(outputUrl);
     if (this.scenario === "output_download_failure") {
       throw new LumaRequestError(
         "Temporary output download failed.",
@@ -88,6 +94,18 @@ export class FakeLumaGateway implements LumaGateway {
         "rejected",
         true,
         503
+      );
+    }
+    if (
+      this.scenario === "expired_output_refresh" &&
+      outputUrl.endsWith("/expired")
+    ) {
+      throw new LumaRequestError(
+        "The temporary output URL expired.",
+        "output_url_expired",
+        "rejected",
+        true,
+        403
       );
     }
     return {

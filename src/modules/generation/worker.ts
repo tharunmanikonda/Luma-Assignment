@@ -4,6 +4,7 @@ import {
   LumaRequestError,
   type LumaGateway
 } from "@/infrastructure/luma/luma-gateway";
+import type { GenerationAttemptRecord } from "./domain";
 import type { GenerationRepository } from "./repository";
 import { failure } from "./repository";
 
@@ -221,9 +222,7 @@ export class GenerationWorker {
     if (attempt.status !== "storing" || !attempt.providerOutputUrl)
       return { action: "complete" };
     try {
-      const output = await this.gateway.downloadOutput(
-        attempt.providerOutputUrl
-      );
+      const output = await this.downloadWithOneRefresh(attempt);
       const extension =
         output.contentType === "image/png"
           ? "png"
@@ -261,6 +260,30 @@ export class GenerationWorker {
         )
       });
       return { action: "reschedule", delayMs: 2_500, reason: code };
+    }
+  }
+
+  private async downloadWithOneRefresh(attempt: GenerationAttemptRecord) {
+    try {
+      return await this.gateway.downloadOutput(attempt.providerOutputUrl!);
+    } catch (error) {
+      if (!attempt.providerGenerationId) throw error;
+      const refreshed = await this.gateway.getGeneration(
+        attempt.providerGenerationId
+      );
+      if (
+        refreshed.state !== "completed" ||
+        !refreshed.outputUrl ||
+        refreshed.outputUrl === attempt.providerOutputUrl
+      ) {
+        throw error;
+      }
+      await this.repository.transition(attempt.id, ["storing"], {
+        providerOutputUrl: refreshed.outputUrl,
+        providerRequestId: refreshed.requestId ?? attempt.providerRequestId,
+        providerApiVersion: refreshed.apiVersion ?? attempt.providerApiVersion
+      });
+      return this.gateway.downloadOutput(refreshed.outputUrl);
     }
   }
 

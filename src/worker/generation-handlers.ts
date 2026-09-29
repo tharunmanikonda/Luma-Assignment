@@ -6,7 +6,13 @@ import {
   type GenerationJobResult
 } from "@/modules/generation/worker";
 import { getEnv } from "@/shared/env";
-import { completeJob, rescheduleJob, type ClaimedJob } from "./core/job-queue";
+import {
+  completeJob,
+  renewLease,
+  rescheduleJob,
+  type ClaimedJob
+} from "./core/job-queue";
+import { generationLeaseMs, withLeaseHeartbeat } from "./lease-heartbeat";
 
 let generationWorker: GenerationWorker | undefined;
 
@@ -38,17 +44,18 @@ export async function handleGenerationJob(job: ClaimedJob, workerId: string) {
   }
 
   const payload = parsePayload(job.payloadJson);
-  let result: GenerationJobResult;
+  let run: () => Promise<GenerationJobResult>;
   if (job.type === "submit_generation") {
-    result = await getGenerationWorker().submit(payload.attemptId);
+    run = () => getGenerationWorker().submit(payload.attemptId);
   } else if (job.type === "poll_generation") {
-    result = await getGenerationWorker().poll(
-      payload.attemptId,
-      payload.pollNumber ?? 0
-    );
+    run = () =>
+      getGenerationWorker().poll(payload.attemptId, payload.pollNumber ?? 0);
   } else {
-    result = await getGenerationWorker().persist(payload.attemptId);
+    run = () => getGenerationWorker().persist(payload.attemptId);
   }
+  const result = await withLeaseHeartbeat(run, () =>
+    renewLease(job.id, workerId, generationLeaseMs)
+  );
 
   if (result.action === "complete") {
     await completeJob(job.id, workerId);

@@ -103,17 +103,35 @@ export class HttpLumaGateway implements LumaGateway {
       detail?: string;
       code?: string;
     };
-    const retryAfter = Number(response.headers.get("retry-after"));
+    const retryAfterMs = parseRetryAfter(
+      response.headers.get("retry-after"),
+      Date.now()
+    );
     return new LumaRequestError(
       body.detail ?? "The provider rejected the request.",
       body.code ?? `http_${response.status}`,
       "rejected",
       retryable,
       response.status,
-      Number.isFinite(retryAfter) ? retryAfter * 1_000 : undefined,
+      retryAfterMs,
       response.headers.get("x-request-id") ?? undefined
     );
   }
+}
+
+export function parseRetryAfter(
+  value: string | null,
+  nowMs = Date.now()
+): number | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) {
+    const seconds = Number(normalized);
+    return Number.isFinite(seconds) ? Math.max(0, seconds * 1_000) : undefined;
+  }
+  const dateMs = Date.parse(normalized);
+  if (!Number.isFinite(dateMs)) return undefined;
+  return Math.max(0, dateMs - nowMs);
 }
 
 function isSupportedContentType(
