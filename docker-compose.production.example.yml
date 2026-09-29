@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: luma_take_home
     volumes:
       - postgres-production-data:/var/lib/postgresql/data
@@ -21,7 +21,7 @@ services:
       - .env.production.local
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/luma_take_home
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/luma_take_home
       LOCAL_OBJECT_STORE_ROOT: /var/lib/luma-object-store
     ports:
       - "3000:3000"
@@ -48,7 +48,7 @@ services:
       - .env.production.local
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/luma_take_home
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/luma_take_home
       LOCAL_OBJECT_STORE_ROOT: /var/lib/luma-object-store
       WORKER_ID: worker-production-1
     volumes:

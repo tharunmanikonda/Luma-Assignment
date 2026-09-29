@@ -29,7 +29,7 @@ Start the worker process with:
 npm run worker
 ```
 
-`docker-compose.production.example.yml` demonstrates the two-process layout and a shared private object-store volume. Copy it to deployment infrastructure rather than committing environment values.
+`docker-compose.production.example.yml` demonstrates the two-process layout and a shared private object-store volume. Copy it to deployment infrastructure rather than committing environment values. Compose refuses to render this file unless `POSTGRES_PASSWORD` is supplied through the host environment or an explicit private `--env-file`; use a strong URL-safe random value because the example also interpolates it into `DATABASE_URL`.
 
 ## Environment Checklist
 
@@ -39,6 +39,7 @@ Required runtime names:
 
 - `NODE_ENV`
 - `APP_ORIGIN`
+- `POSTGRES_PASSWORD`
 - `DATABASE_URL`
 - `BETTER_AUTH_SECRET`
 - `BETTER_AUTH_URL`
@@ -54,12 +55,12 @@ Required runtime names:
 - `LUMA_PROVIDER`
 - `LUMA_API_KEY`
 
-Local production smoke should set `LUMA_PROVIDER=fake` and leave `LUMA_API_KEY` unset. Controlled real-provider verification should set `LUMA_PROVIDER=real` and provide `LUMA_API_KEY` only through the host secret mechanism.
+For the Compose example, `DATABASE_URL` is assembled from the private `POSTGRES_PASSWORD`; deployments using managed PostgreSQL should instead provide the provider-issued `DATABASE_URL` directly and remove the Compose override. Local production smoke should use an ignored disposable Compose env file, set `LUMA_PROVIDER=fake`, and leave `LUMA_API_KEY` unset. Controlled real-provider verification should set `LUMA_PROVIDER=real` and provide `LUMA_API_KEY` only through the host secret mechanism.
 
 ## First Deploy
 
 1. Provision the host, domain, TLS, PostgreSQL, and private asset storage.
-2. Build the image and start PostgreSQL.
+2. Supply `POSTGRES_PASSWORD` from the host secret mechanism, then build the image and start PostgreSQL. For example, pass a private env file explicitly with `docker compose --env-file <private-env-file> -f docker-compose.production.example.yml ...`; do not commit that file.
 3. Run database migrations once before starting or restarting the worker:
 
    ```bash
