@@ -126,6 +126,10 @@ input {
   padding: 8px 10px;
 }
 
+.form > .button {
+  margin-top: 18px;
+}
+
 .error {
   color: var(--danger);
   font-weight: 700;
