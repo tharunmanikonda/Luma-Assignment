@@ -146,6 +146,12 @@
   padding: 34px 0;
 }
 
+.pagination {
+  display: flex;
+  justify-content: center;
+  padding-top: 20px;
+}
+
 .sectionHeading {
   align-items: flex-end;
   display: flex;

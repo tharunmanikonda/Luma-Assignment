@@ -1,4 +1,14 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  lt,
+  or,
+  sql,
+  type SQL
+} from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { activityEvents, assets } from "@/db/schema";
 import { AppError } from "@/shared/errors";
@@ -16,14 +26,56 @@ type ActorContext = {
   workspaceId: string;
 };
 
+type ProductCursor = {
+  v: 1;
+  timestamp: string;
+  id: string;
+};
+
+export function encodeProductCursor(input: { timestamp: string; id: string }) {
+  return Buffer.from(JSON.stringify({ v: 1, ...input }), "utf8").toString(
+    "base64url"
+  );
+}
+
+export function decodeProductCursor(value: string): ProductCursor {
+  try {
+    if (value.length > 512) throw new Error("Cursor is too long.");
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as Partial<ProductCursor>;
+    if (
+      parsed.v !== 1 ||
+      typeof parsed.timestamp !== "string" ||
+      !Number.isFinite(Date.parse(parsed.timestamp)) ||
+      typeof parsed.id !== "string" ||
+      !/^product_[a-z0-9]{24}$/.test(parsed.id)
+    ) {
+      throw new Error("Cursor fields are invalid.");
+    }
+    return parsed as ProductCursor;
+  } catch {
+    throw new AppError("BAD_REQUEST", "Product cursor is invalid.", 400);
+  }
+}
+
+export function durableSourceUrl(
+  assetId: string | null,
+  status: "pending" | "ready" | "failed" | null
+) {
+  return assetId && status === "ready"
+    ? `/api/assets/${encodeURIComponent(assetId)}/content`
+    : null;
+}
+
 function summaryFromRow(row: {
   id: string;
   sku: string;
   name: string;
   category: string | null;
   updatedAt: Date;
+  sourceAssetId: string | null;
   sourceStatus: "pending" | "ready" | "failed" | null;
-  sourceUrl: string | null;
   sceneText: string | null;
 }) {
   const status = deriveCatalogStatus({
@@ -37,7 +89,7 @@ function summaryFromRow(row: {
     category: row.category,
     updatedAt: row.updatedAt.toISOString(),
     sourceStatus: row.sourceStatus,
-    sourceUrl: row.sourceUrl,
+    sourceUrl: durableSourceUrl(row.sourceAssetId, row.sourceStatus),
     sceneSummary: row.sceneText,
     status,
     statusLabel: statusLabels[status],
@@ -47,6 +99,38 @@ function summaryFromRow(row: {
   };
 }
 
+function catalogConditions(input: { workspaceId: string; search?: string }) {
+  const conditions: SQL[] = [eq(products.workspaceId, input.workspaceId)];
+  const search = input.search?.trim();
+  if (search) {
+    conditions.push(
+      or(
+        ilike(products.sku, `%${search}%`),
+        ilike(products.name, `%${search}%`)
+      )!
+    );
+  }
+  return conditions;
+}
+
+const readyCondition = sql<boolean>`${assets.status} = 'ready' and nullif(btrim(${sceneBriefs.text}), '') is not null`;
+const needsSetupCondition = sql<boolean>`not coalesce((${readyCondition}), false)`;
+
+function statusCondition(status?: CatalogWorkflowStatus | "all") {
+  if (status === "ready_to_generate") return readyCondition;
+  if (status === "needs_setup") return needsSetupCondition;
+  return undefined;
+}
+
+function countProducts(conditions: SQL[], status?: CatalogWorkflowStatus) {
+  return getDb()
+    .select({ value: count() })
+    .from(products)
+    .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
+    .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
+    .where(and(...conditions, statusCondition(status)));
+}
+
 export async function listProducts(input: {
   actor: ActorContext;
   search?: string;
@@ -54,59 +138,66 @@ export async function listProducts(input: {
   cursor?: string;
 }) {
   const db = getDb();
-  const search = input.search?.trim();
-  const where = search
-    ? and(
-        eq(products.workspaceId, input.actor.workspaceId),
-        or(
-          ilike(products.sku, `%${search}%`),
-          ilike(products.name, `%${search}%`)
+  const baseConditions = catalogConditions({
+    workspaceId: input.actor.workspaceId,
+    search: input.search
+  });
+  const cursor = input.cursor ? decodeProductCursor(input.cursor) : null;
+  const cursorCondition = cursor
+    ? or(
+        sql`${products.updatedAt} < ${cursor.timestamp}::timestamptz`,
+        and(
+          sql`${products.updatedAt} = ${cursor.timestamp}::timestamptz`,
+          lt(products.id, cursor.id)
         )
       )
-    : eq(products.workspaceId, input.actor.workspaceId);
-  const rows = await db
-    .select({
-      id: products.id,
-      sku: products.sku,
-      name: products.name,
-      category: products.category,
-      updatedAt: products.updatedAt,
-      sourceStatus: assets.status,
-      sourceUrl: assets.originalUrl,
-      sceneText: sceneBriefs.text
-    })
-    .from(products)
-    .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
-    .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
-    .where(where)
-    .orderBy(desc(products.updatedAt), desc(products.id));
+    : undefined;
 
-  const summaries = rows.map(summaryFromRow);
-  const filtered =
-    !input.status || input.status === "all"
-      ? summaries
-      : summaries.filter((product) => product.status === input.status);
-  const start = input.cursor
-    ? Math.max(
-        0,
-        filtered.findIndex((product) => product.id === input.cursor) + 1
-      )
-    : 0;
-  const page = filtered.slice(start, start + pageSize);
-  const counts = {
-    all: summaries.length,
-    needs_setup: summaries.filter((product) => product.status === "needs_setup")
-      .length,
-    ready_to_generate: summaries.filter(
-      (product) => product.status === "ready_to_generate"
-    ).length
-  };
+  const [rows, [allCount], [needsSetupCount], [readyCount]] = await Promise.all(
+    [
+      db
+        .select({
+          id: products.id,
+          sku: products.sku,
+          name: products.name,
+          category: products.category,
+          updatedAt: products.updatedAt,
+          cursorTimestamp: sql<string>`${products.updatedAt}::text`,
+          sourceAssetId: assets.id,
+          sourceStatus: assets.status,
+          sceneText: sceneBriefs.text
+        })
+        .from(products)
+        .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
+        .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
+        .where(
+          and(...baseConditions, statusCondition(input.status), cursorCondition)
+        )
+        .orderBy(desc(products.updatedAt), desc(products.id))
+        .limit(pageSize + 1),
+      countProducts(baseConditions),
+      countProducts(baseConditions, "needs_setup"),
+      countProducts(baseConditions, "ready_to_generate")
+    ]
+  );
 
+  const hasMore = rows.length > pageSize;
+  const page = rows.slice(0, pageSize);
+  const last = page.at(-1);
   return {
-    products: page,
-    counts,
+    products: page.map(summaryFromRow),
+    counts: {
+      all: allCount.value,
+      needs_setup: needsSetupCount.value,
+      ready_to_generate: readyCount.value
+    },
     nextCursor:
-      start + pageSize < filtered.length ? (page.at(-1)?.id ?? null) : null
+      hasMore && last
+        ? encodeProductCursor({
+            timestamp: last.cursorTimestamp,
+            id: last.id
+          })
+        : null
   };
 }
 
@@ -130,7 +221,6 @@ export async function getProduct(input: {
       updatedAt: products.updatedAt,
       sourceAssetId: assets.id,
       sourceStatus: assets.status,
-      sourceUrl: assets.originalUrl,
       sourceWidth: assets.width,
       sourceHeight: assets.height,
       sourceFailure: assets.failureDetailsJson,
@@ -173,6 +263,7 @@ export async function getProduct(input: {
 
   return {
     ...row,
+    sourceUrl: durableSourceUrl(row.sourceAssetId, row.sourceStatus),
     updatedAt: row.updatedAt.toISOString(),
     status,
     statusLabel: statusLabels[status],

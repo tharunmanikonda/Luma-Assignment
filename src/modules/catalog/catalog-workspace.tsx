@@ -124,7 +124,7 @@ function ProductImage({
     return <div className={styles.imageEmpty}>No source photo</div>;
   }
   return (
-    // The original URL is provenance while background ingestion creates the private copy.
+    // The API only returns the authenticated route for the durable asset copy.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       className={styles.thumbnail}
@@ -440,7 +440,7 @@ function ProductPanel({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={product.sourceUrl}
-                  alt={`${product.name} original product`}
+                  alt={`${product.name} source product`}
                 />
               ) : (
                 <div className={styles.imageEmpty}>No source photo</div>
@@ -622,6 +622,34 @@ export function CatalogWorkspace({
     [search, status]
   );
 
+  async function loadMore() {
+    if (!data.nextCursor) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        status,
+        cursor: data.nextCursor
+      });
+      if (search.trim()) params.set("search", search.trim());
+      const next = await readJson<ProductList>(
+        await fetch(`/api/products?${params}`, { cache: "no-store" })
+      );
+      setData((current) => ({
+        ...next,
+        products: [...current.products, ...next.products]
+      }));
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "More products could not be loaded."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(search, status), 250);
     return () => window.clearTimeout(timer);
@@ -788,42 +816,55 @@ export function CatalogWorkspace({
             </button>
           </div>
         ) : (
-          <div
-            className={styles.productTable}
-            role="table"
-            aria-label="Products"
-          >
-            <div className={styles.tableHeader} role="row">
-              <span>Product</span>
-              <span>Scene</span>
-              <span>Status</span>
-              <span>Next action</span>
-            </div>
-            {data.products.map((product) => (
-              <button
-                className={styles.productRow}
-                role="row"
-                key={product.id}
-                onClick={() => setPanel({ type: "product", id: product.id })}
-              >
-                <span className={styles.productCell}>
-                  <ProductImage product={product} />
-                  <span className={styles.productIdentity}>
-                    <strong>{product.name}</strong>
-                    <small>
-                      {product.sku}
-                      {product.category ? ` · ${product.category}` : ""}
-                    </small>
+          <>
+            <div
+              className={styles.productTable}
+              role="table"
+              aria-label="Products"
+            >
+              <div className={styles.tableHeader} role="row">
+                <span>Product</span>
+                <span>Scene</span>
+                <span>Status</span>
+                <span>Next action</span>
+              </div>
+              {data.products.map((product) => (
+                <button
+                  className={styles.productRow}
+                  role="row"
+                  key={product.id}
+                  onClick={() => setPanel({ type: "product", id: product.id })}
+                >
+                  <span className={styles.productCell}>
+                    <ProductImage product={product} />
+                    <span className={styles.productIdentity}>
+                      <strong>{product.name}</strong>
+                      <small>
+                        {product.sku}
+                        {product.category ? ` · ${product.category}` : ""}
+                      </small>
+                    </span>
                   </span>
-                </span>
-                <span className={styles.sceneCell}>
-                  {product.sceneSummary ?? "No scene direction"}
-                </span>
-                <StatusBadge product={product} />
-                <span className={styles.rowAction}>{product.nextAction}</span>
-              </button>
-            ))}
-          </div>
+                  <span className={styles.sceneCell}>
+                    {product.sceneSummary ?? "No scene direction"}
+                  </span>
+                  <StatusBadge product={product} />
+                  <span className={styles.rowAction}>{product.nextAction}</span>
+                </button>
+              ))}
+            </div>
+            {data.nextCursor ? (
+              <div className={styles.pagination}>
+                <button
+                  className={styles.secondaryButton}
+                  onClick={() => void loadMore()}
+                  disabled={loading}
+                >
+                  {loading ? "Loading..." : "View more products"}
+                </button>
+              </div>
+            ) : null}
+          </>
         )}
       </section>
       {panel?.type === "import" ? (

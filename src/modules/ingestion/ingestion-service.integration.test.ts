@@ -2,12 +2,12 @@ import { readFile } from "node:fs/promises";
 import { and, count, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, getDb } from "@/db/client";
-import { jobs, users, workspaces } from "@/db/schema";
+import { activityEvents, jobs, users, workspaces } from "@/db/schema";
 import type {
   ObjectStore,
   StoredObject
 } from "@/infrastructure/storage/object-store";
-import { getProduct } from "@/modules/catalog/catalog-service";
+import { getProduct, listProducts } from "@/modules/catalog/catalog-service";
 import { products, sceneBriefs } from "@/modules/catalog/schema";
 import { saveSceneBrief } from "@/modules/scene-briefs/scene-brief-service";
 import { resetFoundationDatabase, runDatabaseTests } from "@/test/postgres";
@@ -156,6 +156,47 @@ describe.runIf(runDatabaseTests)(
         .where(eq(jobs.type, "submit_generation"));
       expect(generationJobs).toBe(0);
 
+      const [unchangedProduct] = await getDb()
+        .select({ id: products.id, updatedAt: products.updatedAt })
+        .from(products)
+        .where(
+          and(
+            eq(products.workspaceId, maya.workspaceId),
+            eq(products.sku, "HG-001")
+          )
+        );
+      const [{ value: unchangedEventCount }] = await getDb()
+        .select({ value: count() })
+        .from(activityEvents)
+        .where(eq(activityEvents.productId, unchangedProduct.id));
+
+      const [mayaProduct] = await getDb()
+        .select({ id: products.id })
+        .from(products)
+        .where(
+          and(
+            eq(products.workspaceId, maya.workspaceId),
+            eq(products.sku, "HG-002")
+          )
+        );
+      const beforeSceneSave = await getDb()
+        .select({ value: count() })
+        .from(jobs)
+        .where(eq(jobs.type, "submit_generation"));
+      const mayaScene =
+        "A bright breakfast table beside a softly lit kitchen window.";
+      const saved = await saveSceneBrief({
+        actor: maya,
+        productId: mayaProduct.id,
+        scene: mayaScene
+      });
+      expect(saved).toMatchObject({ source: "maya_edited", repeated: false });
+      const afterSceneSave = await getDb()
+        .select({ value: count() })
+        .from(jobs)
+        .where(eq(jobs.type, "submit_generation"));
+      expect(afterSceneSave).toEqual(beforeSceneSave);
+
       const second = await createIngestionBatch({
         actor: maya,
         idempotencyKey: "catalog-upload-002",
@@ -176,41 +217,55 @@ describe.runIf(runDatabaseTests)(
         .where(eq(products.workspaceId, maya.workspaceId));
       expect(countAfterReimport).toBe(40);
 
-      const [product] = await getDb()
-        .select({ id: products.id })
+      const [unchangedAfterReimport] = await getDb()
+        .select({ updatedAt: products.updatedAt })
         .from(products)
-        .where(
-          and(
-            eq(products.workspaceId, maya.workspaceId),
-            eq(products.sku, "HG-002")
-          )
-        );
-      await expect(
-        getProduct({ actor: outsider, productId: product.id })
-      ).rejects.toMatchObject({
-        code: "NOT_FOUND"
-      });
-
-      const beforeSceneSave = await getDb()
+        .where(eq(products.id, unchangedProduct.id));
+      const [{ value: eventsAfterReimport }] = await getDb()
         .select({ value: count() })
-        .from(jobs)
-        .where(eq(jobs.type, "submit_generation"));
-      const saved = await saveSceneBrief({
+        .from(activityEvents)
+        .where(eq(activityEvents.productId, unchangedProduct.id));
+      expect(unchangedAfterReimport.updatedAt).toEqual(
+        unchangedProduct.updatedAt
+      );
+      expect(eventsAfterReimport).toBe(unchangedEventCount);
+
+      const mayaDetail = await getProduct({
         actor: maya,
-        productId: product.id,
-        scene: "A bright breakfast table beside a softly lit kitchen window."
+        productId: mayaProduct.id
       });
-      expect(saved).toMatchObject({ source: "maya_edited", repeated: false });
+      expect(mayaDetail.sceneText).toBe(mayaScene);
       const versions = await getDb()
         .select({ version: sceneBriefs.version })
         .from(sceneBriefs)
-        .where(eq(sceneBriefs.productId, product.id));
+        .where(eq(sceneBriefs.productId, mayaProduct.id));
       expect(versions).toHaveLength(2);
-      const afterSceneSave = await getDb()
-        .select({ value: count() })
-        .from(jobs)
-        .where(eq(jobs.type, "submit_generation"));
-      expect(afterSceneSave).toEqual(beforeSceneSave);
+
+      const firstPage = await listProducts({ actor: maya, status: "all" });
+      expect(firstPage.products).toHaveLength(24);
+      expect(firstPage.nextCursor).toEqual(expect.any(String));
+      const secondPage = await listProducts({
+        actor: maya,
+        status: "all",
+        cursor: firstPage.nextCursor!
+      });
+      expect(secondPage.products).toHaveLength(16);
+      expect(secondPage.nextCursor).toBeNull();
+      expect(
+        new Set([
+          ...firstPage.products.map((product) => product.id),
+          ...secondPage.products.map((product) => product.id)
+        ]).size
+      ).toBe(40);
+      await expect(
+        listProducts({ actor: maya, status: "all", cursor: "invalid" })
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+      await expect(
+        getProduct({ actor: outsider, productId: mayaProduct.id })
+      ).rejects.toMatchObject({
+        code: "NOT_FOUND"
+      });
     });
   }
 );

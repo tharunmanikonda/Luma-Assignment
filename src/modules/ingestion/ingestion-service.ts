@@ -34,6 +34,20 @@ type ActorContext = {
 
 export type PreviewAction = "create" | "update" | "unchanged" | "blocked";
 
+export type ExistingProductSnapshot = {
+  id: string;
+  sku: string;
+  name: string;
+  category: string | null;
+  colorFinish: string | null;
+  material: string | null;
+  priceMinor: number | null;
+  currency: string;
+  notes: string | null;
+  photoUrl: string | null;
+  sceneText: string | null;
+};
+
 function validateIdempotencyKey(value: string | null) {
   if (!value || !/^[A-Za-z0-9._:-]{8,128}$/.test(value)) {
     throw new AppError(
@@ -61,18 +75,8 @@ function comparableProduct(row: NormalizedCatalogRow) {
   };
 }
 
-function sameCatalogData(
-  existing: {
-    name: string;
-    category: string | null;
-    colorFinish: string | null;
-    material: string | null;
-    priceMinor: number | null;
-    currency: string;
-    notes: string | null;
-    photoUrl: string | null;
-    sceneText: string | null;
-  },
+export function isCatalogRowUnchanged(
+  existing: ExistingProductSnapshot,
   row: NormalizedCatalogRow
 ) {
   const catalog = comparableProduct(row);
@@ -85,7 +89,7 @@ function sameCatalogData(
     existing.currency === catalog.currency &&
     existing.notes === catalog.notes &&
     existing.photoUrl === row.photoUrl &&
-    existing.sceneText === row.shotIdea
+    (existing.sceneText !== null || row.shotIdea === null)
   );
 }
 
@@ -292,22 +296,8 @@ export async function parseIngestionBatch(
   }
 }
 
-type ExistingProduct = {
-  id: string;
-  sku: string;
-  name: string;
-  category: string | null;
-  colorFinish: string | null;
-  material: string | null;
-  priceMinor: number | null;
-  currency: string;
-  notes: string | null;
-  photoUrl: string | null;
-  sceneText: string | null;
-};
-
 async function existingProductsForRows(workspaceId: string, skus: string[]) {
-  if (!skus.length) return new Map<string, ExistingProduct>();
+  if (!skus.length) return new Map<string, ExistingProductSnapshot>();
   const rows = await getDb()
     .select({
       id: products.id,
@@ -334,7 +324,7 @@ async function existingProductsForRows(workspaceId: string, skus: string[]) {
 function itemOutcome(
   raw: CatalogRawRow,
   errors: IngestionRowError[],
-  existingBySku: Map<string, ExistingProduct>
+  existingBySku: Map<string, ExistingProductSnapshot>
 ): { action: PreviewAction; normalized: NormalizedCatalogRow | null } {
   if (errors.length) return { action: "blocked", normalized: null };
   const normalized = normalizeCatalogRow(raw).normalized;
@@ -342,7 +332,9 @@ function itemOutcome(
   const existing = existingBySku.get(normalized.sku);
   if (!existing) return { action: "create", normalized };
   return {
-    action: sameCatalogData(existing, normalized) ? "unchanged" : "update",
+    action: isCatalogRowUnchanged(existing, normalized)
+      ? "unchanged"
+      : "update",
     normalized
   };
 }
@@ -491,6 +483,7 @@ export async function commitIngestionBatch(input: {
             eq(products.sku, normalized.sku)
           )
         )
+        .for("update")
         .limit(1);
       const productId = existing?.id ?? newId("product");
 
@@ -501,6 +494,33 @@ export async function commitIngestionBatch(input: {
             .where(eq(assets.id, existing.currentSourceAssetId))
             .limit(1)
         : [];
+      const [currentBrief] = existing?.currentSceneBriefId
+        ? await tx
+            .select({ text: sceneBriefs.text })
+            .from(sceneBriefs)
+            .where(eq(sceneBriefs.id, existing.currentSceneBriefId))
+            .limit(1)
+        : [];
+
+      if (
+        existing &&
+        isCatalogRowUnchanged(
+          {
+            ...existing,
+            photoUrl: currentAsset?.originalUrl ?? null,
+            sceneText: currentBrief?.text ?? null
+          },
+          normalized
+        )
+      ) {
+        await tx
+          .update(ingestionItems)
+          .set({ productId })
+          .where(eq(ingestionItems.id, item.id));
+        committed += 1;
+        continue;
+      }
+
       let sourceAssetId = existing?.currentSourceAssetId ?? null;
       if (!sourceAssetId || currentAsset?.originalUrl !== normalized.photoUrl) {
         sourceAssetId = newId("asset");
@@ -543,33 +563,24 @@ export async function commitIngestionBatch(input: {
         });
       }
 
-      if (normalized.shotIdea) {
-        const [currentBrief] = existing?.currentSceneBriefId
-          ? await tx
-              .select({ text: sceneBriefs.text })
-              .from(sceneBriefs)
-              .where(eq(sceneBriefs.id, existing.currentSceneBriefId))
-              .limit(1)
-          : [];
-        if (currentBrief?.text !== normalized.shotIdea) {
-          const [latest] = await tx
-            .select({ version: max(sceneBriefs.version) })
-            .from(sceneBriefs)
-            .where(eq(sceneBriefs.productId, productId));
-          const sceneBriefId = newId("scene");
-          await tx.insert(sceneBriefs).values({
-            id: sceneBriefId,
-            productId,
-            version: (latest?.version ?? 0) + 1,
-            text: normalized.shotIdea,
-            source: "imported",
-            createdBy: input.actor.id
-          });
-          await tx
-            .update(products)
-            .set({ currentSceneBriefId: sceneBriefId, updatedAt: new Date() })
-            .where(eq(products.id, productId));
-        }
+      if (!existing?.currentSceneBriefId && normalized.shotIdea) {
+        const [latest] = await tx
+          .select({ version: max(sceneBriefs.version) })
+          .from(sceneBriefs)
+          .where(eq(sceneBriefs.productId, productId));
+        const sceneBriefId = newId("scene");
+        await tx.insert(sceneBriefs).values({
+          id: sceneBriefId,
+          productId,
+          version: (latest?.version ?? 0) + 1,
+          text: normalized.shotIdea,
+          source: "imported",
+          createdBy: input.actor.id
+        });
+        await tx
+          .update(products)
+          .set({ currentSceneBriefId: sceneBriefId, updatedAt: new Date() })
+          .where(eq(products.id, productId));
       }
 
       await tx

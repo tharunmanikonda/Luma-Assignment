@@ -62,6 +62,8 @@ describe("catalog CSV", () => {
   it("stores prices as integer cents", () => {
     expect(parseUsdPrice("$48")).toBe(4800);
     expect(parseUsdPrice("1,249.95")).toBe(124995);
+    expect(parseUsdPrice("$0")).toBeNull();
+    expect(parseUsdPrice("0.00")).toBeNull();
     expect(parseUsdPrice("12.999")).toBeNull();
     expect(parseUsdPrice("free")).toBeNull();
   });
