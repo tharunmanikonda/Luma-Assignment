@@ -1,13 +1,25 @@
 # Assumptions
 
-## Task 01 Boundary
+## Customer Workflow
 
-I treated Task 01 as the foundation only: auth, database schema, storage, jobs, health checks, and a role-gated shell. Catalog import, product workflow, Luma generation, reviews, exports, deployment, and final challenge narrative remain outside this task.
+I assumed Maya wants one operational workspace for the 40-product drop, not another creative dashboard. That led to a single product queue, explicit generation confirmation, and a CSV export that can return to the team's spreadsheet habits.
 
-## Auth Library Boundary
+## Approval
 
-The schema is Better Auth-compatible and includes Better Auth's expected auth tables, but the implementation currently uses a small local credential/session wrapper so the foundation can be verified without depending on public sign-up, email, or provider features. Public sign-up is explicitly disabled.
+I assumed Ellie is the only approver for this first release. Review links are stable but not secret-bearing; Ellie signs in and can only act on reviews assigned to her account.
 
-## Local Development
+## Budget
 
-The platform uses local PostgreSQL through Docker Compose and local filesystem object storage by default. Real Luma, object-storage, hosting, and submission credentials are not read by this task.
+I assumed every image edit may spend budget once Luma accepts it. The app therefore records an attempt before external submission, requires quote confirmation, uses idempotency keys, and refuses automatic paid resubmission after uncertain provider acceptance.
+
+## Generated Assets
+
+I assumed generated outputs must be copied into app-controlled storage before review or download. Luma output URLs are treated as temporary provider implementation details, not final assets.
+
+## Evaluation
+
+I assumed the evaluator can receive private demo credentials separately from public documentation. This repository names the required environment variables but does not include credential values.
+
+## Deployment
+
+I assumed this task should prepare deployment verification without deploying or calling real Luma from the agent environment. Real provider credentials, deployment secrets, and `submit.sh` remain coordinator-only.

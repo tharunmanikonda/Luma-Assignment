@@ -2,7 +2,7 @@
 
 ## Local Platform Setup
 
-Task 01 has created the application foundation. To run it locally:
+This repository contains the integrated Maya/Ellie image-production workflow. To run it locally:
 
 ```bash
 npm install
@@ -15,6 +15,12 @@ npm run dev
 
 Open `http://localhost:3000/sign-in` and use the fake local demo accounts from `.env.local`.
 
+Run the background worker in a second terminal before exercising generation:
+
+```bash
+npm run worker
+```
+
 Useful checks:
 
 ```bash
@@ -26,7 +32,7 @@ npm run build
 npm run worker
 ```
 
-More implementation notes live in `docs/platform-foundation.md`.
+Evaluator notes live in `APPROACH.md`, `ASSUMPTIONS.md`, and `video.md`.
 
 ---
 
