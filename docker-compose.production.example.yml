@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: luma_take_home
+    volumes:
+      - postgres-production-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d luma_take_home"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    command: ["npm", "run", "start"]
+    restart: unless-stopped
+    env_file:
+      - .env.production.local
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/luma_take_home
+      LOCAL_OBJECT_STORE_ROOT: /var/lib/luma-object-store
+    ports:
+      - "3000:3000"
+    volumes:
+      - object-store-data:/var/lib/luma-object-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build: .
+    command: ["npm", "run", "worker"]
+    restart: unless-stopped
+    env_file:
+      - .env.production.local
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/luma_take_home
+      LOCAL_OBJECT_STORE_ROOT: /var/lib/luma-object-store
+      WORKER_ID: worker-production-1
+    volumes:
+      - object-store-data:/var/lib/luma-object-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-production-data:
+  object-store-data:

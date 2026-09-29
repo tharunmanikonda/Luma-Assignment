@@ -23,3 +23,11 @@ Video link: <replace with Loom, Drive, or YouTube URL after recording>
 6:30-7:30 Engineering walkthrough: auth boundary, services, PostgreSQL queue, fake vs real Luma adapter, object storage, idempotency, and review authorization.
 
 7:30-8:00 Tradeoffs and next steps: deployment checklist, real Luma coordinator step, object-storage swap, monitoring, and why batch generation is deferred until single-product flow is observed.
+
+## Release Recording Notes
+
+- Record against the public deployment URL after `/api/health` and `/api/ready` pass.
+- Keep credential entry brief and do not show secret-management screens.
+- Use the fake provider for rehearsal. Use one real Luma generation only after the coordinator approves the paid verification step in `docs/release-runbook.md`.
+- Show the deployed worker doing real background work by refreshing or closing Maya's page while the generation progresses.
+- End the engineering segment with the release shape: persistent web process, persistent worker, PostgreSQL queue, private asset storage, and rollback path.

@@ -18,6 +18,7 @@ const envSchema = z.object({
   DEMO_MAYA_PASSWORD: z.string().min(8),
   DEMO_ELLIE_EMAIL: z.string().email(),
   DEMO_ELLIE_PASSWORD: z.string().min(8),
+  LUMA_PROVIDER: z.enum(["real", "fake"]).default("real"),
   LUMA_API_KEY: z.string().optional(),
   DEMO_GENERATION_BUDGET_CENTS: z.coerce
     .number()

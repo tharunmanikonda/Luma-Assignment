@@ -1,5 +1,6 @@
 .env
 .env.local
+.env.production.local
 .take-home-token
 node_modules/
 .next/

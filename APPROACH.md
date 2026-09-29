@@ -66,10 +66,15 @@ At 10x the catalog, the first pressure points are generation budget, worker thro
 
 ## Deployment Checklist
 
-- Apply the reviewed Drizzle migration to a clean PostgreSQL database.
-- Set server-only auth, database, object-storage, Luma, and demo account environment variables.
-- Run the seed command without printing credentials.
-- Start the web process and at least one worker process.
-- Verify `/api/health` and `/api/ready`.
-- Import `data/catalog.csv`, create one fake-provider generation, request Ellie changes, revise, approve, download the approved image, and export catalog status.
-- Real Luma credentials, public deployment, and final submission are coordinator-only steps.
+The prepared release shape is a Dockerized web process plus a Dockerized worker process, PostgreSQL 16, and private durable asset storage shared by both processes. For the shortest public evaluation path I would deploy this as Docker Compose on a small VPS behind HTTPS; Vercel is a poor fit because the worker must be persistent, while Railway/Render/Fly are reasonable after confirming worker persistence and durable private asset storage.
+
+`docs/release-runbook.md` contains the full deployment runbook, names-only environment checklist, fake-service smoke test, controlled one-generation real-Luma procedure, public end-to-end checklist, rollback plan, and video preparation notes.
+
+Coordinator-owned remaining steps:
+
+- Choose the external host and whether to use compose-managed PostgreSQL or managed PostgreSQL.
+- Configure secret values in the provider secret store.
+- Deploy the image and start `web` plus `worker`.
+- Run one fake-provider public end-to-end verification.
+- Optionally perform exactly one controlled real-Luma generation.
+- Record/upload the video and run `submit.sh`.

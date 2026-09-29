@@ -1,4 +1,5 @@
 import { HttpLumaGateway } from "@/infrastructure/luma/http-luma-gateway";
+import { FakeLumaGateway } from "@/infrastructure/luma/fake-luma-gateway";
 import { getObjectStore } from "@/infrastructure/storage/local-object-store";
 import { PostgresGenerationRepository } from "@/modules/generation/postgres-repository";
 import {
@@ -19,12 +20,10 @@ let generationWorker: GenerationWorker | undefined;
 function getGenerationWorker() {
   if (!generationWorker) {
     const env = getEnv();
-    if (!env.LUMA_API_KEY) {
-      throw new Error(
-        "LUMA_API_KEY is required before generation jobs can be processed."
-      );
-    }
-    const gateway = new HttpLumaGateway(env.LUMA_API_KEY);
+    const gateway =
+      env.LUMA_PROVIDER === "fake"
+        ? new FakeLumaGateway("success")
+        : createRealGateway(env.LUMA_API_KEY);
     generationWorker = new GenerationWorker(
       new PostgresGenerationRepository(),
       gateway,
@@ -32,6 +31,16 @@ function getGenerationWorker() {
     );
   }
   return generationWorker;
+}
+
+function createRealGateway(apiKey: string | undefined) {
+  if (!apiKey) {
+    throw new Error(
+      "LUMA_API_KEY is required before real generation jobs can be processed."
+    );
+  }
+
+  return new HttpLumaGateway(apiKey);
 }
 
 export async function handleGenerationJob(job: ClaimedJob, workerId: string) {

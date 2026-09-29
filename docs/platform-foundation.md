@@ -56,3 +56,7 @@ Initial job types are already registered for CSV parsing, source ingestion, gene
 
 - `/api/health` checks process liveness only.
 - `/api/ready` checks database reachability and returns `503` when PostgreSQL is unavailable.
+
+## Release Switches
+
+`LUMA_PROVIDER=real` uses the HTTP Luma gateway and requires `LUMA_API_KEY` in the server or worker environment. `LUMA_PROVIDER=fake` uses the in-process fake gateway so production packaging, database, worker, and private asset persistence can be verified without a paid external call.

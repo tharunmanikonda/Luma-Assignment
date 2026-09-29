@@ -33,6 +33,7 @@ npm run worker
 ```
 
 Evaluator notes live in `APPROACH.md`, `ASSUMPTIONS.md`, and `video.md`.
+Release preparation, deployment shape, real-provider verification, and rollback notes live in `docs/release-runbook.md`.
 
 ---
 
