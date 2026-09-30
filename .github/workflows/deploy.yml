@@ -1,0 +1,124 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: tharunmanikonda/luma-assignment
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: luma_take_home
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d luma_take_home"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      APP_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/luma_take_home
+      BETTER_AUTH_SECRET: ci-only-secret-at-least-sixteen-characters
+      BETTER_AUTH_URL: http://localhost:3000
+      LOCAL_OBJECT_STORE_ROOT: /tmp/luma-object-store
+      DEMO_MAYA_EMAIL: maya@example.test
+      DEMO_MAYA_PASSWORD: local-maya-password
+      DEMO_ELLIE_EMAIL: ellie@example.test
+      DEMO_ELLIE_PASSWORD: local-ellie-password
+      LUMA_PROVIDER: fake
+      RUN_DATABASE_TESTS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run format
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run db:migrate
+      - run: npm test
+      - run: npm run build
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image
+        run: echo "value=${REGISTRY}/${IMAGE_NAME,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.value }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DROPLET_HOST }}
+          SSH_PORT: ${{ secrets.DROPLET_SSH_PORT || '22' }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/luma-deploy
+          chmod 0600 ~/.ssh/luma-deploy
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+      - name: Upload deployment files
+        env:
+          SSH_HOST: ${{ secrets.DROPLET_HOST }}
+          SSH_USER: ${{ secrets.DROPLET_USER }}
+          SSH_PORT: ${{ secrets.DROPLET_SSH_PORT || '22' }}
+        run: |
+          release_dir="/opt/luma/releases/${GITHUB_SHA}"
+          ssh -i ~/.ssh/luma-deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p '$release_dir'"
+          scp -i ~/.ssh/luma-deploy -P "$SSH_PORT" deploy/docker-compose.yml deploy/Caddyfile deploy/deploy.sh "$SSH_USER@$SSH_HOST:$release_dir/"
+      - name: Deploy and verify
+        env:
+          APP_IMAGE: ${{ needs.publish.outputs.image }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SSH_HOST: ${{ secrets.DROPLET_HOST }}
+          SSH_USER: ${{ secrets.DROPLET_USER }}
+          SSH_PORT: ${{ secrets.DROPLET_SSH_PORT || '22' }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/luma-deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "docker login ghcr.io -u '${GITHUB_ACTOR}' --password-stdin"
+          ssh -i ~/.ssh/luma-deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "APP_IMAGE='$APP_IMAGE' RELEASE_DIR='/opt/luma/releases/${GITHUB_SHA}' bash '/opt/luma/releases/${GITHUB_SHA}/deploy.sh'"

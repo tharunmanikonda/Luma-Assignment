@@ -1,0 +1,82 @@
+name: luma
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: luma_take_home
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d luma_take_home"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  web:
+    image: ${APP_IMAGE:?set APP_IMAGE}
+    command: ["npm", "run", "start"]
+    restart: unless-stopped
+    env_file:
+      - .env.production.local
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/luma_take_home
+      LOCAL_OBJECT_STORE_ROOT: /var/lib/luma-object-store
+    volumes:
+      - object-store-data:/var/lib/luma-object-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    image: ${APP_IMAGE:?set APP_IMAGE}
+    command: ["npm", "run", "worker"]
+    restart: unless-stopped
+    env_file:
+      - .env.production.local
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/luma_take_home
+      LOCAL_OBJECT_STORE_ROOT: /var/lib/luma-object-store
+      WORKER_ID: worker-production-1
+    volumes:
+      - object-store-data:/var/lib/luma-object-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  object-store-data:
+  caddy-data:
+  caddy-config:
