@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+/* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
 import { ArrowLeft, Check, ImageIcon, Maximize2, X } from "lucide-react";
 import React from "react";
@@ -211,14 +211,14 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
                 onClick={() => setZoomOpen(true)}
                 aria-label={`Enlarge ${review.candidate.imageAlt}`}
               >
-                <Image
+                <img
                   className={styles.heroImage}
-                  src={review.candidate.imageUrl}
+                  src={imageVariant(review.candidate.imageUrl, "preview")}
                   alt={review.candidate.imageAlt}
                   width={1200}
                   height={1200}
-                  priority
-                  unoptimized
+                  fetchPriority="high"
+                  decoding="async"
                 />
                 <span className={styles.zoomHint}>
                   <Maximize2 aria-hidden="true" />
@@ -230,13 +230,16 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
           {compareMode !== "candidate" ? (
             <figure className={styles.sourceImage}>
               <figcaption>Original</figcaption>
-              <Image
-                src={review.source.imageUrl}
-                alt={review.source.imageAlt}
-                width={1200}
-                height={1200}
-                unoptimized
-              />
+              <div className={styles.sourceMedia}>
+                <img
+                  src={imageVariant(review.source.imageUrl, "preview")}
+                  alt={review.source.imageAlt}
+                  width={1200}
+                  height={1200}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
             </figure>
           ) : null}
         </div>
@@ -303,12 +306,13 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
             <ol>
               {history.map((item) => (
                 <li key={item.attemptId}>
-                  <Image
-                    src={item.imageUrl}
+                  <img
+                    src={imageVariant(item.imageUrl, "thumbnail")}
                     alt={`Generated image ${item.attemptNumber} for ${review.product.name}`}
                     width={640}
                     height={640}
-                    unoptimized
+                    loading="lazy"
+                    decoding="async"
                   />
                   <div>
                     <div className={styles.historyTitle}>
@@ -497,12 +501,12 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
           >
             <X aria-hidden="true" />
           </button>
-          <Image
+          <img
             src={review.candidate.imageUrl}
             alt={review.candidate.imageAlt}
             width={1600}
             height={1600}
-            unoptimized
+            decoding="async"
           />
         </div>
       ) : null}
@@ -512,4 +516,8 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
 
 function ImageIconPlaceholder() {
   return <ImageIcon aria-hidden="true" className={styles.historyEmptyIcon} />;
+}
+
+function imageVariant(url: string, variant: "thumbnail" | "preview") {
+  return `${url}${url.includes("?") ? "&" : "?"}variant=${variant}`;
 }

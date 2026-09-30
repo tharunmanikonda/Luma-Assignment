@@ -36,8 +36,10 @@ export function ReviewInbox({
       <article className={styles.card} key={review.id}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={review.imageUrl}
+          src={imageVariant(review.imageUrl, "thumbnail")}
           alt={`${review.productName} generated image ${review.attemptNumber}`}
+          loading="lazy"
+          decoding="async"
         />
         <div className={styles.body}>
           <div className={styles.titleRow}>
@@ -132,4 +134,8 @@ export function ReviewInbox({
       </main>
     </div>
   );
+}
+
+function imageVariant(url: string, variant: "thumbnail") {
+  return `${url}${url.includes("?") ? "&" : "?"}variant=${variant}`;
 }

@@ -80,7 +80,7 @@ describe("CatalogWorkspace", () => {
       screen
         .getByRole("img", { name: "Stoneware Mug source product" })
         .getAttribute("src")
-    ).toBe("/api/assets/asset_123/content");
+    ).toBe("/api/assets/asset_123/content?variant=thumbnail");
   });
 
   it("keeps the operations overview stable when catalog filters change", async () => {
@@ -399,7 +399,7 @@ describe("CatalogWorkspace", () => {
           name: "Stoneware Mug generated image 1"
         })
       ).getAttribute("src")
-    ).toBe("/api/assets/asset_candidate/content");
+    ).toBe("/api/assets/asset_candidate/content?variant=preview");
     expect(
       screen.queryByRole("button", { name: "Review generation quote" })
     ).toBeNull();

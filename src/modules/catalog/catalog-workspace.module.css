@@ -1107,6 +1107,7 @@
 .topbar {
   background: rgba(255, 255, 255, 0.96);
   border-bottom: 1px solid #d9e0dc;
+  grid-template-columns: minmax(0, 1fr) auto;
   margin: 0 -28px;
   min-height: 58px;
   padding: 9px 28px;
@@ -1321,6 +1322,10 @@
   gap: 12px;
   grid-template-columns: 150px 1fr;
 }
+.sourceStage {
+  height: 142px;
+  min-height: 0;
+}
 .sourceStage img,
 .sourceStage .imageEmpty {
   height: 142px;
@@ -1412,6 +1417,9 @@
   }
   .productHero {
     grid-template-columns: 110px 1fr;
+  }
+  .sourceStage {
+    height: 112px;
   }
   .sourceStage img,
   .sourceStage .imageEmpty {

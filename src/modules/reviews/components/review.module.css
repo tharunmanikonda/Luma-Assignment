@@ -807,3 +807,50 @@
   white-space: nowrap;
   width: 1px;
 }
+
+/* Keep review media inspectable without letting it dominate large screens. */
+.reviewImages.view_candidate,
+.reviewImages.view_source {
+  margin-inline: auto;
+  max-width: 680px;
+  width: 100%;
+}
+
+.sourceImage {
+  aspect-ratio: auto;
+  background: transparent;
+  overflow: visible;
+}
+
+.imageButton,
+.sourceMedia {
+  aspect-ratio: auto;
+  background: #eef1ef;
+  height: clamp(340px, 44vw, 500px);
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.view_compare .imageButton,
+.view_compare .sourceMedia {
+  height: clamp(300px, 31vw, 430px);
+}
+
+.heroImage,
+.sourceMedia img {
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .imageButton,
+  .sourceMedia,
+  .view_compare .imageButton,
+  .view_compare .sourceMedia {
+    height: min(82vw, 340px);
+    min-height: 250px;
+  }
+}

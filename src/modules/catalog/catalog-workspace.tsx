@@ -190,6 +190,14 @@ function money(minor: number | null, currency: string) {
   );
 }
 
+function imageVariant(url: string, variant: "thumbnail" | "preview") {
+  return `${url}${url.includes("?") ? "&" : "?"}variant=${variant}`;
+}
+
+function assetImageUrl(assetId: string, variant: "thumbnail" | "preview") {
+  return `/api/assets/${encodeURIComponent(assetId)}/content?variant=${variant}`;
+}
+
 function StatusBadge({ product }: { product: ProductSummary }) {
   return (
     <span className={`${styles.status} ${styles[product.status]}`}>
@@ -211,8 +219,10 @@ function ProductImage({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       className={styles.thumbnail}
-      src={product.sourceUrl}
+      src={imageVariant(product.sourceUrl, "thumbnail")}
       alt={`${product.name} source product`}
+      loading="lazy"
+      decoding="async"
     />
   );
 }
@@ -853,8 +863,9 @@ function ProductPanel({
               {product.sourceUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={product.sourceUrl}
+                  src={imageVariant(product.sourceUrl, "thumbnail")}
                   alt={`${product.name} source product`}
+                  decoding="async"
                 />
               ) : (
                 <div className={styles.imageEmpty}>No source photo</div>
@@ -1122,8 +1133,10 @@ function ProductPanel({
                   <figure>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={product.sourceUrl}
+                      src={imageVariant(product.sourceUrl, "preview")}
                       alt={`${product.name} source product`}
+                      loading="lazy"
+                      decoding="async"
                     />
                     <figcaption>Source</figcaption>
                   </figure>
@@ -1138,8 +1151,12 @@ function ProductPanel({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       className={styles.candidateImage}
-                      src={`/api/assets/${encodeURIComponent(selectedCandidate.outputAssetId)}/content`}
+                      src={assetImageUrl(
+                        selectedCandidate.outputAssetId,
+                        "preview"
+                      )}
                       alt={`${product.name} generated image ${selectedCandidate.attemptNumber}`}
+                      decoding="async"
                       onError={() =>
                         markImageBroken(selectedCandidate.outputAssetId!)
                       }
@@ -1237,8 +1254,13 @@ function ProductPanel({
                     !brokenImages.has(candidate.outputAssetId) ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={`/api/assets/${encodeURIComponent(candidate.outputAssetId)}/content`}
+                        src={assetImageUrl(
+                          candidate.outputAssetId,
+                          "thumbnail"
+                        )}
                         alt={`${product.name} previous generated image ${candidate.attemptNumber}`}
+                        loading="lazy"
+                        decoding="async"
                         onError={() =>
                           markImageBroken(candidate.outputAssetId!)
                         }
@@ -1284,8 +1306,10 @@ function ProductPanel({
                   <article key={output.assetId}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={output.imageUrl}
+                      src={imageVariant(output.imageUrl, "thumbnail")}
                       alt={`${product.name} approved generated image ${output.attemptNumber}`}
+                      loading="lazy"
+                      decoding="async"
                     />
                     <div>
                       <strong>Generated image {output.attemptNumber}</strong>
