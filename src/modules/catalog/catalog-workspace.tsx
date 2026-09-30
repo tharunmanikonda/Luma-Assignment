@@ -7,6 +7,19 @@ import React, {
   useRef,
   useState
 } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Download,
+  FileUp,
+  ImageIcon,
+  LoaderCircle,
+  LogOut,
+  Search,
+  Upload,
+  X
+} from "lucide-react";
 import { MayaReviewStatus } from "@/modules/reviews/components/maya-review-status";
 import styles from "./catalog-workspace.module.css";
 
@@ -29,6 +42,22 @@ type ProductList = {
   products: ProductSummary[];
   counts: { all: number; needs_setup: number; ready_to_generate: number };
   nextCursor: string | null;
+};
+
+type UsageSummary = {
+  estimatedSpend: {
+    amount: string;
+    currency: string;
+    basis: string;
+    estimated: boolean;
+  };
+  attempts: {
+    total: number;
+    successful: number;
+    failed: number;
+    active: number;
+  };
+  approvedImages: number;
 };
 
 type ProductDetail = {
@@ -273,17 +302,29 @@ function ImportPanel({
   const processing =
     preview && ["uploaded", "validating"].includes(preview.batch.status);
   return (
-    <Panel title="Import catalog" onClose={onClose}>
+    <Panel title="Import catalog" onClose={onClose} size="compact">
       {!preview ? (
         <section className={styles.panelSection}>
-          <p className={styles.eyebrow}>Step 1 of 3</p>
+          <div className={styles.stepIndicator} aria-label="Import step 1 of 3">
+            <span className={styles.activeStep}>1</span>
+            <i />
+            <span>2</span>
+            <i />
+            <span>3</span>
+          </div>
           <h3>Select the catalog CSV</h3>
           <p className={styles.help}>
             Use the supplied columns. You will review every change before
             products are imported.
           </p>
           <label className={styles.fileField}>
-            <span>CSV file</span>
+            <Upload aria-hidden="true" size={22} />
+            <strong>{file ? file.name : "Choose a CSV file"}</strong>
+            <span>
+              {file
+                ? "Ready to review"
+                : "Drag and drop or browse from your device"}
+            </span>
             <input
               type="file"
               accept=".csv,text/csv"
@@ -293,19 +334,38 @@ function ImportPanel({
               }}
             />
           </label>
-          {file ? <p className={styles.fileName}>{file.name}</p> : null}
           <button
             className={styles.primaryButton}
             onClick={upload}
             disabled={!file || busy}
           >
-            {busy ? "Uploading..." : "Review import"}
+            {busy ? (
+              <>
+                <LoaderCircle className={styles.spinner} aria-hidden="true" />{" "}
+                Uploading...
+              </>
+            ) : (
+              <>
+                <FileUp aria-hidden="true" /> Review import
+              </>
+            )}
           </button>
         </section>
       ) : (
         <>
           <section className={styles.panelSection}>
-            <p className={styles.eyebrow}>Step 2 of 3</p>
+            <div
+              className={styles.stepIndicator}
+              aria-label="Import step 2 of 3"
+            >
+              <span className={styles.completedStep}>
+                <Check aria-hidden="true" />
+              </span>
+              <i />
+              <span className={styles.activeStep}>2</span>
+              <i />
+              <span>3</span>
+            </div>
             <h3>{preview.batch.filename}</h3>
             {processing ? (
               <p className={styles.notice}>
@@ -722,7 +782,7 @@ function ProductPanel({
           attempt.id === candidate.id ? { ...attempt, review } : attempt
         )
       );
-      setReviewMessage("Candidate sent to Ellie for review.");
+      setReviewMessage("Generated image sent to Ellie for review.");
     } catch (error) {
       setReviewMessage(
         error instanceof Error ? error.message : "Review could not be created."
@@ -830,7 +890,7 @@ function ProductPanel({
                 <strong>Revising from Ellie&apos;s feedback</strong>
                 <span>
                   Update the direction below. The saved revision will retain the
-                  link to the reviewed candidate.
+                  link to the reviewed image.
                 </span>
               </div>
             ) : null}
@@ -854,7 +914,7 @@ function ProductPanel({
             <div className={styles.sceneFooter}>
               <span>
                 {product.sceneVersion
-                  ? `Version ${product.sceneVersion}`
+                  ? `Saved direction ${product.sceneVersion}`
                   : "Not saved yet"}
               </span>
               <button
@@ -866,7 +926,7 @@ function ProductPanel({
                   ? "Saving..."
                   : revisionReviewId
                     ? "Save revision"
-                    : "Save scene"}
+                    : "Save direction"}
               </button>
             </div>
             {message ? (
@@ -885,7 +945,7 @@ function ProductPanel({
           <section className={styles.generationPanel}>
             <div>
               <p className={styles.eyebrow}>Image generation</p>
-              <h3>Generate candidates</h3>
+              <h3>Create product imagery</h3>
             </div>
             {workflowLoading ? (
               <p className={styles.notice}>Loading generation history...</p>
@@ -895,10 +955,13 @@ function ProductPanel({
               </p>
             ) : activeAttempt ? (
               <div className={styles.generationStatus}>
-                <strong>{activeAttempt.customerState.label}</strong>
+                <strong>
+                  <LoaderCircle className={styles.spinner} aria-hidden="true" />{" "}
+                  {activeAttempt.customerState.label}
+                </strong>
                 <p>
                   {activeAttempt.customerState.nextAction ??
-                    "You can close this panel. Progress will resume here when you return."}
+                    "Your image is being prepared. You can continue working and return here to review it."}
                 </p>
               </div>
             ) : quote ? (
@@ -939,25 +1002,13 @@ function ProductPanel({
             ) : currentCandidate ? (
               <div className={styles.generationStatus}>
                 <strong>
-                  {successfulCandidates.length} candidate
+                  {successfulCandidates.length} generated image
                   {successfulCandidates.length === 1 ? "" : "s"} available
                 </strong>
                 <p>
-                  Review the selected image below or deliberately create another
-                  candidate from scene version {product.sceneVersion}.
+                  Review the selected image below. Save a new direction when you
+                  are ready to create a different result.
                 </p>
-                <button
-                  className={styles.secondaryButton}
-                  onClick={reviewQuote}
-                  disabled={generationBusy || sceneIsDirty}
-                >
-                  {generationBusy
-                    ? "Loading quote..."
-                    : "Generate another candidate"}
-                </button>
-                {sceneIsDirty ? (
-                  <p>Save the scene changes before requesting a new quote.</p>
-                ) : null}
               </div>
             ) : latestCurrentAttempt?.status === "failed" ? (
               <div className={styles.generationStatus}>
@@ -980,9 +1031,7 @@ function ProductPanel({
                 onClick={reviewQuote}
                 disabled={generationBusy}
               >
-                {generationBusy
-                  ? "Loading quote..."
-                  : "Review generation quote"}
+                {generationBusy ? "Loading quote..." : "Generate image"}
               </button>
             )}
             {generationMessage ? (
@@ -1002,9 +1051,9 @@ function ProductPanel({
               <div className={styles.candidateHeading}>
                 <div>
                   <p className={styles.eyebrow}>Generated images</p>
-                  <h3>Candidate {selectedCandidate.attemptNumber}</h3>
+                  <h3>Generated image {selectedCandidate.attemptNumber}</h3>
                   <p className={styles.help}>
-                    Scene version {selectedCandidate.sceneBriefVersion}
+                    Direction {selectedCandidate.sceneBriefVersion}
                     {selectedCandidate.sceneBriefId !== product.sceneBriefId
                       ? " · Previous scene"
                       : " · Current scene"}
@@ -1014,7 +1063,7 @@ function ProductPanel({
                   <button
                     className={styles.secondaryButton}
                     type="button"
-                    aria-label="Show previous candidate"
+                    aria-label="Show previous generated image"
                     disabled={selectedCandidateIndex <= 0}
                     onClick={() =>
                       setSelectedAttemptId(
@@ -1023,7 +1072,10 @@ function ProductPanel({
                       )
                     }
                   >
-                    Previous
+                    <ArrowLeft aria-hidden="true" size={16} />
+                    <span className={styles.srOnly}>
+                      Previous generated image
+                    </span>
                   </button>
                   <span aria-live="polite">
                     {selectedCandidateIndex + 1} of{" "}
@@ -1032,7 +1084,7 @@ function ProductPanel({
                   <button
                     className={styles.secondaryButton}
                     type="button"
-                    aria-label="Show next candidate"
+                    aria-label="Show next generated image"
                     disabled={
                       selectedCandidateIndex < 0 ||
                       selectedCandidateIndex >= successfulCandidates.length - 1
@@ -1044,7 +1096,8 @@ function ProductPanel({
                       )
                     }
                   >
-                    Next
+                    <ArrowRight aria-hidden="true" size={16} />
+                    <span className={styles.srOnly}>Next generated image</span>
                   </button>
                 </div>
               </div>
@@ -1054,7 +1107,7 @@ function ProductPanel({
                   className={!compareWithSource ? styles.activeCompare : ""}
                   onClick={() => setCompareWithSource(false)}
                 >
-                  Candidate only
+                  Generated image
                 </button>
                 <button
                   type="button"
@@ -1086,14 +1139,14 @@ function ProductPanel({
                     <img
                       className={styles.candidateImage}
                       src={`/api/assets/${encodeURIComponent(selectedCandidate.outputAssetId)}/content`}
-                      alt={`${product.name} generated candidate ${selectedCandidate.attemptNumber}`}
+                      alt={`${product.name} generated image ${selectedCandidate.attemptNumber}`}
                       onError={() =>
                         markImageBroken(selectedCandidate.outputAssetId!)
                       }
                     />
                   )}
                   <figcaption>
-                    Candidate {selectedCandidate.attemptNumber}
+                    Generated image {selectedCandidate.attemptNumber}
                   </figcaption>
                 </figure>
               </div>
@@ -1168,8 +1221,8 @@ function ProductPanel({
           {successfulCandidates.length > 1 ? (
             <section className={styles.candidateHistory}>
               <div>
-                <p className={styles.eyebrow}>Candidate history</p>
-                <h3>Choose a candidate</h3>
+                <p className={styles.eyebrow}>Image history</p>
+                <h3>Choose a generated image</h3>
               </div>
               <div className={styles.historyGrid}>
                 {successfulCandidates.map((candidate) => (
@@ -1185,7 +1238,7 @@ function ProductPanel({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={`/api/assets/${encodeURIComponent(candidate.outputAssetId)}/content`}
-                        alt={`${product.name} previous generated candidate ${candidate.attemptNumber}`}
+                        alt={`${product.name} previous generated image ${candidate.attemptNumber}`}
                         onError={() =>
                           markImageBroken(candidate.outputAssetId!)
                         }
@@ -1196,12 +1249,12 @@ function ProductPanel({
                       </div>
                     )}
                     <div>
-                      <strong>Candidate {candidate.attemptNumber}</strong>
+                      <strong>Image {candidate.attemptNumber}</strong>
                       <span>
-                        Scene version {candidate.sceneBriefVersion}
+                        Direction {candidate.sceneBriefVersion}
                         {candidate.sceneBriefId !== product.sceneBriefId
                           ? " · Previous scene"
-                          : " · Earlier candidate"}
+                          : " · Earlier image"}
                       </span>
                       <span>
                         {candidate.review
@@ -1232,10 +1285,10 @@ function ProductPanel({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={output.imageUrl}
-                      alt={`${product.name} approved image, candidate ${output.attemptNumber}`}
+                      alt={`${product.name} approved generated image ${output.attemptNumber}`}
                     />
                     <div>
-                      <strong>Candidate {output.attemptNumber}</strong>
+                      <strong>Generated image {output.attemptNumber}</strong>
                       <a
                         className={styles.secondaryButton}
                         href={output.downloadUrl}
@@ -1281,15 +1334,19 @@ function ProductPanel({
 function Panel({
   title,
   onClose,
+  size = "product",
   children
 }: {
   title: string;
   onClose: () => void;
+  size?: "compact" | "product";
   children: React.ReactNode;
 }) {
   const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
     panel?.querySelector<HTMLElement>("button, a, input, textarea")?.focus();
@@ -1320,6 +1377,7 @@ function Panel({
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus();
     };
   }, [onClose]);
@@ -1334,15 +1392,20 @@ function Panel({
     >
       <aside
         ref={panelRef}
-        className={styles.panel}
+        className={`${styles.panel} ${size === "compact" ? styles.compactPanel : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
         <header className={styles.panelHeader}>
           <h2>{title}</h2>
-          <button className={styles.secondaryButton} onClick={onClose}>
-            Close
+          <button
+            className={styles.iconButton}
+            onClick={onClose}
+            aria-label="Close"
+            title="Close"
+          >
+            <X aria-hidden="true" />
           </button>
         </header>
         <div className={styles.panelBody}>{children}</div>
@@ -1361,6 +1424,8 @@ export function CatalogWorkspace({
   accountControl: React.ReactNode;
 }) {
   const [data, setData] = useState(initialData);
+  const [overview, setOverview] = useState(initialData);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<
     "all" | "needs_setup" | "ready_to_generate"
@@ -1395,6 +1460,23 @@ export function CatalogWorkspace({
     },
     [search, status]
   );
+
+  const refreshOverview = useCallback(async () => {
+    try {
+      const [nextOverview, nextUsage] = await Promise.all([
+        readJson<ProductList>(
+          await fetch("/api/products?status=all", { cache: "no-store" })
+        ),
+        readJson<UsageSummary>(await fetch("/api/usage", { cache: "no-store" }))
+      ]);
+      setOverview(nextOverview);
+      setUsage(nextUsage);
+    } catch {
+      // Preserve the last complete overview while catalog work continues.
+    }
+  }, []);
+
+  useEffect(() => void refreshOverview(), [refreshOverview]);
 
   async function loadMore() {
     if (!data.nextCursor) return;
@@ -1431,44 +1513,56 @@ export function CatalogWorkspace({
 
   const attention = useMemo(
     () =>
-      data.products
+      overview.products
         .filter((product) => product.status === "needs_setup")
         .slice(0, 4),
-    [data.products]
+    [overview.products]
   );
-  const progress = data.counts.all
-    ? Math.round((data.counts.ready_to_generate / data.counts.all) * 100)
+  const reviewActivity = useMemo(
+    () =>
+      overview.products
+        .filter((product) =>
+          /Ellie|approved|changes/i.test(
+            `${product.statusLabel} ${product.nextAction}`
+          )
+        )
+        .slice(0, 4),
+    [overview.products]
+  );
+  const progress = overview.counts.all
+    ? Math.round(
+        (overview.counts.ready_to_generate / overview.counts.all) * 100
+      )
     : 0;
+  const estimatedSpend = usage?.estimatedSpend;
 
   return (
     <main className={styles.workspace}>
       <header className={styles.topbar}>
         <div>
-          <span className={styles.wordmark}>Maya Home Goods</span>
-          <span className={styles.signedIn}>Signed in as {actorName}</span>
+          <span className={styles.wordmark}>Home Goods Studio</span>
         </div>
-        <nav aria-label="Workspace">
-          <a aria-current="page" href="#products">
-            Products
-          </a>
-          <span>Reviews</span>
-          <span>Usage</span>
-        </nav>
         <div className={styles.headerActions}>
           <a
             className={styles.secondaryButton}
             href="/api/exports/catalog.csv"
             download
           >
-            Export catalog status
+            <Download aria-hidden="true" size={16} /> Export
           </a>
           <button
             className={styles.secondaryButton}
             onClick={() => setPanel({ type: "import" })}
           >
-            Import CSV
+            <FileUp aria-hidden="true" size={16} /> Import
           </button>
-          {accountControl}
+          <span
+            className={styles.accountControl}
+            title={`Sign out ${actorName}`}
+          >
+            <LogOut aria-hidden="true" size={16} />
+            {accountControl}
+          </span>
         </div>
       </header>
 
@@ -1476,14 +1570,11 @@ export function CatalogWorkspace({
         <div>
           <p className={styles.eyebrow}>Launch workspace</p>
           <h1 id="launch-heading">Q4 Product Images</h1>
-          <p>
-            {data.counts.ready_to_generate} ready to generate ·{" "}
-            {data.counts.needs_setup} need setup · no generation spend yet
-          </p>
+          <p>Catalog readiness, review activity, and generation usage.</p>
         </div>
         <div className={styles.progressSummary}>
           <strong>
-            {data.counts.ready_to_generate} of {data.counts.all}
+            {overview.counts.ready_to_generate} of {overview.counts.all}
           </strong>
           <span>prepared</span>
         </div>
@@ -1495,43 +1586,120 @@ export function CatalogWorkspace({
         </div>
       </section>
 
-      <section className={styles.attentionBand}>
-        <div className={styles.sectionHeading}>
-          <div>
-            <p className={styles.eyebrow}>Priority queue</p>
-            <h2>Needs your attention</h2>
-          </div>
-          <span>{attention.length} shown</span>
+      <section className={styles.metrics} aria-label="Workspace summary">
+        <div>
+          <span className={`${styles.metricDot} ${styles.readyDot}`} />
+          <p>
+            <strong>{overview.counts.ready_to_generate}</strong>
+            <span>Ready to generate</span>
+          </p>
         </div>
-        {attention.length ? (
-          <div className={styles.attentionList}>
-            {attention.map((product) => (
-              <button
-                className={styles.attentionRow}
-                key={product.id}
-                onClick={() => setPanel({ type: "product", id: product.id })}
-              >
-                <ProductImage product={product} />
-                <span className={styles.productIdentity}>
-                  <strong>{product.name}</strong>
-                  <small>
-                    {product.sku} ·{" "}
-                    {product.sourceStatus === "failed"
-                      ? "Source photo needs attention"
-                      : product.sceneSummary
-                        ? "Source photo is still preparing"
-                        : "Add scene direction"}
-                  </small>
-                </span>
-                <span className={styles.rowAction}>Finish setup</span>
-              </button>
-            ))}
+        <div>
+          <span className={`${styles.metricDot} ${styles.setupDot}`} />
+          <p>
+            <strong>{overview.counts.needs_setup}</strong>
+            <span>Need setup</span>
+          </p>
+        </div>
+        <div>
+          <ImageIcon aria-hidden="true" />
+          <p>
+            <strong>{usage?.attempts?.successful ?? 0}</strong>
+            <span>Images generated</span>
+          </p>
+        </div>
+        <div>
+          <Check aria-hidden="true" />
+          <p>
+            <strong>{usage?.approvedImages ?? 0}</strong>
+            <span>Approved</span>
+          </p>
+        </div>
+        <div>
+          <span className={`${styles.metricDot} ${styles.spendDot}`} />
+          <p>
+            <strong>
+              {estimatedSpend
+                ? new Intl.NumberFormat("en-US", {
+                    style: "currency",
+                    currency: estimatedSpend.currency
+                  }).format(Number(estimatedSpend.amount))
+                : "—"}
+            </strong>
+            <span>Authorized spend</span>
+          </p>
+        </div>
+      </section>
+
+      <section className={styles.operationsGrid}>
+        <div className={styles.attentionBand}>
+          <div className={styles.sectionHeading}>
+            <div>
+              <p className={styles.eyebrow}>Priority queue</p>
+              <h2>Needs your attention</h2>
+            </div>
+            <span>{attention.length} shown</span>
           </div>
-        ) : (
-          <div className={styles.emptyBand}>
-            <p>No products need setup in this view.</p>
+          {attention.length ? (
+            <div className={styles.attentionList}>
+              {attention.map((product) => (
+                <button
+                  className={styles.attentionRow}
+                  key={product.id}
+                  onClick={() => setPanel({ type: "product", id: product.id })}
+                >
+                  <ProductImage product={product} />
+                  <span className={styles.productIdentity}>
+                    <strong>{product.name}</strong>
+                    <small>
+                      {product.sku} ·{" "}
+                      {product.sourceStatus === "failed"
+                        ? "Source photo needs attention"
+                        : product.sceneSummary
+                          ? "Source photo is still preparing"
+                          : "Add scene direction"}
+                    </small>
+                  </span>
+                  <span className={styles.rowAction}>Finish setup</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className={styles.emptyBand}>
+              <p>No products need setup in this view.</p>
+            </div>
+          )}
+        </div>
+        <div className={styles.reviewActivity}>
+          <div className={styles.sectionHeading}>
+            <div>
+              <p className={styles.eyebrow}>Review activity</p>
+              <h2>Ellie&apos;s decisions</h2>
+            </div>
+            <span>{reviewActivity.length} recent</span>
           </div>
-        )}
+          {reviewActivity.length ? (
+            <div className={styles.activityList}>
+              {reviewActivity.map((product) => (
+                <button
+                  key={product.id}
+                  onClick={() => setPanel({ type: "product", id: product.id })}
+                >
+                  <span className={styles.metricDot} />
+                  <span>
+                    <strong>{product.name}</strong>
+                    <small>{product.statusLabel}</small>
+                  </span>
+                  <ArrowRight aria-hidden="true" size={16} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className={styles.emptyBand}>
+              <p>Review decisions will appear here.</p>
+            </div>
+          )}
+        </div>
       </section>
 
       <section className={styles.productsBand} id="products">
@@ -1545,6 +1713,11 @@ export function CatalogWorkspace({
         <div className={styles.filters}>
           <label>
             <span className={styles.srOnly}>Search products</span>
+            <Search
+              className={styles.searchIcon}
+              aria-hidden="true"
+              size={16}
+            />
             <input
               type="search"
               value={search}
@@ -1598,41 +1771,47 @@ export function CatalogWorkspace({
           </div>
         ) : (
           <>
-            <div
-              className={styles.productTable}
-              role="table"
-              aria-label="Products"
-            >
-              <div className={styles.tableHeader} role="row">
-                <span>Product</span>
-                <span>Scene</span>
-                <span>Status</span>
-                <span>Next action</span>
-              </div>
-              {data.products.map((product) => (
-                <button
-                  className={styles.productRow}
-                  role="row"
-                  key={product.id}
-                  onClick={() => setPanel({ type: "product", id: product.id })}
-                >
-                  <span className={styles.productCell}>
-                    <ProductImage product={product} />
-                    <span className={styles.productIdentity}>
-                      <strong>{product.name}</strong>
-                      <small>
-                        {product.sku}
-                        {product.category ? ` · ${product.category}` : ""}
-                      </small>
+            <div className={styles.tableViewport}>
+              <div
+                className={styles.productTable}
+                role="table"
+                aria-label="Products"
+              >
+                <div className={styles.tableHeader} role="row">
+                  <span>Product</span>
+                  <span>Scene</span>
+                  <span>Status</span>
+                  <span>Next action</span>
+                </div>
+                {data.products.map((product) => (
+                  <button
+                    className={styles.productRow}
+                    role="row"
+                    key={product.id}
+                    onClick={() =>
+                      setPanel({ type: "product", id: product.id })
+                    }
+                  >
+                    <span className={styles.productCell}>
+                      <ProductImage product={product} />
+                      <span className={styles.productIdentity}>
+                        <strong>{product.name}</strong>
+                        <small>
+                          {product.sku}
+                          {product.category ? ` · ${product.category}` : ""}
+                        </small>
+                      </span>
                     </span>
-                  </span>
-                  <span className={styles.sceneCell}>
-                    {product.sceneSummary ?? "No scene direction"}
-                  </span>
-                  <StatusBadge product={product} />
-                  <span className={styles.rowAction}>{product.nextAction}</span>
-                </button>
-              ))}
+                    <span className={styles.sceneCell}>
+                      {product.sceneSummary ?? "No scene direction"}
+                    </span>
+                    <StatusBadge product={product} />
+                    <span className={styles.rowAction}>
+                      {product.nextAction}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
             {data.nextCursor ? (
               <div className={styles.pagination}>
@@ -1651,14 +1830,20 @@ export function CatalogWorkspace({
       {panel?.type === "import" ? (
         <ImportPanel
           onClose={() => setPanel(null)}
-          onCommitted={() => void refresh()}
+          onCommitted={() => {
+            void refresh();
+            void refreshOverview();
+          }}
         />
       ) : null}
       {panel?.type === "product" ? (
         <ProductPanel
           productId={panel.id}
           onClose={() => setPanel(null)}
-          onSaved={() => void refresh()}
+          onSaved={() => {
+            void refresh();
+            void refreshOverview();
+          }}
         />
       ) : null}
     </main>

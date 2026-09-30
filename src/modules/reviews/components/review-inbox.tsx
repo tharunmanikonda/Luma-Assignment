@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import React, { useState } from "react";
+import { ArrowRight, CheckCircle2, Clock3 } from "lucide-react";
+import React from "react";
 import styles from "./review-inbox.module.css";
 
 export type ReviewInboxItem = {
@@ -25,22 +26,59 @@ export function ReviewInbox({
   reviews: ReviewInboxItem[];
   accountControl: React.ReactNode;
 }) {
-  const [view, setView] = useState<"pending" | "decided" | "all">("pending");
-  const pendingCount = reviews.filter(
-    (review) => review.state === "pending"
-  ).length;
-  const visibleReviews = reviews.filter((review) => {
-    if (view === "pending") return review.state === "pending";
-    if (view === "decided") return review.state !== "pending";
-    return true;
-  });
+  const pendingReviews = reviews.filter((review) => review.state === "pending");
+  const completedReviews = reviews.filter(
+    (review) => review.state !== "pending"
+  );
+
+  function renderReview(review: ReviewInboxItem) {
+    return (
+      <article className={styles.card} key={review.id}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={review.imageUrl}
+          alt={`${review.productName} generated image ${review.attemptNumber}`}
+        />
+        <div className={styles.body}>
+          <div className={styles.titleRow}>
+            <h2>{review.productName}</h2>
+            <span
+              className={`${styles.status} ${review.state === "pending" ? styles.pending : ""}`}
+            >
+              {review.state === "changes_requested"
+                ? "Changes requested"
+                : review.state}
+            </span>
+          </div>
+          <p className={styles.meta}>
+            {review.sku} · Image {review.attemptNumber} · Direction{" "}
+            {review.sceneVersion}
+          </p>
+          <p className={styles.meta}>
+            Sent{" "}
+            {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
+              new Date(review.createdAt)
+            )}
+          </p>
+          <p className={styles.scene}>{review.sceneDirection}</p>
+          <Link className={styles.openLink} href={`/reviews/${review.id}`}>
+            {review.state === "pending" ? "Review image" : "View decision"}
+            <ArrowRight aria-hidden="true" size={16} />
+          </Link>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
+      <header
+        className={styles.header}
+        aria-label={`Review workspace for ${actorName}`}
+      >
         <div>
-          <strong>Maya Home Goods</strong>
-          <span>Signed in as {actorName}</span>
+          <strong>Home Goods Studio</strong>
+          <span>Image review</span>
         </div>
         {accountControl}
       </header>
@@ -50,84 +88,45 @@ export function ReviewInbox({
             <p className={styles.eyebrow}>Review workspace</p>
             <h1>Assigned to you</h1>
           </div>
-          <span>{pendingCount} waiting for a decision</span>
+          <span>{pendingReviews.length} waiting for a decision</span>
         </div>
-        <div className={styles.tabs} aria-label="Review inbox filters">
-          <button
-            type="button"
-            aria-pressed={view === "pending"}
-            onClick={() => setView("pending")}
-          >
-            Pending <span>{pendingCount}</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === "decided"}
-            onClick={() => setView("decided")}
-          >
-            Decided <span>{reviews.length - pendingCount}</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === "all"}
-            onClick={() => setView("all")}
-          >
-            All <span>{reviews.length}</span>
-          </button>
-        </div>
-        {visibleReviews.length ? (
-          <div className={styles.grid}>
-            {visibleReviews.map((review) => (
-              <article className={styles.card} key={review.id}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={review.imageUrl}
-                  alt={`${review.productName} candidate ${review.attemptNumber}`}
-                />
-                <div className={styles.body}>
-                  <div className={styles.titleRow}>
-                    <h2>{review.productName}</h2>
-                    <span
-                      className={`${styles.status} ${review.state === "pending" ? styles.pending : ""}`}
-                    >
-                      {review.state.replace("_", " ")}
-                    </span>
-                  </div>
-                  <p className={styles.meta}>
-                    {review.sku} · Candidate {review.attemptNumber} · Scene{" "}
-                    {review.sceneVersion}
-                  </p>
-                  <p className={styles.meta}>
-                    Sent{" "}
-                    {new Intl.DateTimeFormat(undefined, {
-                      dateStyle: "medium"
-                    }).format(new Date(review.createdAt))}
-                  </p>
-                  <p className={styles.scene}>{review.sceneDirection}</p>
-                  <Link
-                    className={styles.openLink}
-                    href={`/reviews/${review.id}`}
-                  >
-                    {review.state === "pending"
-                      ? "Review candidate"
-                      : "View decision"}
-                  </Link>
+        {reviews.length ? (
+          <div className={styles.reviewSections}>
+            <section aria-labelledby="pending-heading">
+              <div className={styles.sectionTitle}>
+                <Clock3 aria-hidden="true" />
+                <h2 id="pending-heading">Pending</h2>
+                <span>{pendingReviews.length}</span>
+              </div>
+              {pendingReviews.length ? (
+                <div className={styles.grid}>
+                  {pendingReviews.map(renderReview)}
                 </div>
-              </article>
-            ))}
+              ) : (
+                <div className={styles.compactEmpty}>No decisions waiting.</div>
+              )}
+            </section>
+            <section aria-labelledby="completed-heading">
+              <div className={styles.sectionTitle}>
+                <CheckCircle2 aria-hidden="true" />
+                <h2 id="completed-heading">Completed</h2>
+                <span>{completedReviews.length}</span>
+              </div>
+              {completedReviews.length ? (
+                <div className={styles.grid}>
+                  {completedReviews.map(renderReview)}
+                </div>
+              ) : (
+                <div className={styles.compactEmpty}>
+                  Completed reviews will appear here.
+                </div>
+              )}
+            </section>
           </div>
         ) : (
           <section className={styles.empty}>
-            <h2>
-              {view === "pending"
-                ? "You are all caught up"
-                : "No reviews in this view"}
-            </h2>
-            <p>
-              {reviews.length
-                ? "Choose another filter to see the rest of your review history."
-                : "When Maya sends a generated candidate, it will appear here."}
-            </p>
+            <h2>No images to review yet</h2>
+            <p>When Maya sends a generated image, it will appear here.</p>
           </section>
         )}
       </main>

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { ArrowLeft, Check, ImageIcon, Maximize2, X } from "lucide-react";
 import React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { ReviewReadModel, ReviewState } from "../domain";
@@ -51,6 +52,8 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
 
   useEffect(() => {
     if (!sheetOpen && !approveOpen && !zoomOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key !== "Escape" || pending) return;
       setSheetOpen(false);
@@ -58,7 +61,10 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
       setZoomOpen(false);
     }
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [approveOpen, pending, sheetOpen, zoomOpen]);
 
   const canDecide = review.canDecide && state === "pending";
@@ -154,14 +160,17 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
     <main className={styles.page}>
       <header className={styles.header}>
         <div className={styles.headerIdentity}>
-          <Link href="/reviews" className={styles.backLink}>
-            Back to inbox
+          <Link
+            href="/reviews"
+            className={styles.backLink}
+            aria-label="Back to inbox"
+            title="Back to inbox"
+          >
+            <ArrowLeft aria-hidden="true" />
           </Link>
           <div>
-            <div className={styles.brand}>Maya Home Goods</div>
-            <div className={styles.version}>
-              Version {review.candidate.attemptNumber}
-            </div>
+            <div className={styles.brand}>Image review</div>
+            <div className={styles.version}>{review.product.sku}</div>
           </div>
         </div>
         <span className={`${styles.status} ${styles[`status_${state}`]}`}>
@@ -184,7 +193,9 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
             >
               {mode === "source"
                 ? "Original"
-                : mode[0].toUpperCase() + mode.slice(1)}
+                : mode === "candidate"
+                  ? "Generated image"
+                  : mode[0].toUpperCase() + mode.slice(1)}
             </button>
           ))}
         </div>
@@ -192,27 +203,33 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
           className={`${styles.reviewImages} ${styles[`view_${compareMode}`]}`}
         >
           {compareMode !== "source" ? (
-            <button
-              className={styles.imageButton}
-              type="button"
-              onClick={() => setZoomOpen(true)}
-              aria-label={`Enlarge ${review.candidate.imageAlt}`}
-            >
-              <Image
-                className={styles.heroImage}
-                src={review.candidate.imageUrl}
-                alt={review.candidate.imageAlt}
-                width={1200}
-                height={1200}
-                priority
-                unoptimized
-              />
-              <span className={styles.imageLabel}>Candidate</span>
-              <span className={styles.zoomHint}>Inspect</span>
-            </button>
+            <figure className={styles.reviewFigure}>
+              <figcaption>Generated image</figcaption>
+              <button
+                className={styles.imageButton}
+                type="button"
+                onClick={() => setZoomOpen(true)}
+                aria-label={`Enlarge ${review.candidate.imageAlt}`}
+              >
+                <Image
+                  className={styles.heroImage}
+                  src={review.candidate.imageUrl}
+                  alt={review.candidate.imageAlt}
+                  width={1200}
+                  height={1200}
+                  priority
+                  unoptimized
+                />
+                <span className={styles.zoomHint}>
+                  <Maximize2 aria-hidden="true" />
+                  <span className={styles.srOnly}>Zoom generated image</span>
+                </span>
+              </button>
+            </figure>
           ) : null}
           {compareMode !== "candidate" ? (
             <figure className={styles.sourceImage}>
+              <figcaption>Original</figcaption>
               <Image
                 src={review.source.imageUrl}
                 alt={review.source.imageAlt}
@@ -220,7 +237,6 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
                 height={1200}
                 unoptimized
               />
-              <figcaption>Original</figcaption>
             </figure>
           ) : null}
         </div>
@@ -257,9 +273,15 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
 
         {!canDecide ? (
           <section className={styles.completed} aria-live="polite">
-            <h2>{statusLabels[state]}</h2>
+            <div className={styles.decisionRecordTitle}>
+              <Check aria-hidden="true" />
+              <div>
+                <p className={styles.eyebrow}>Decision record</p>
+                <h2>{statusLabels[state]}</h2>
+              </div>
+            </div>
             {state === "changes_requested" && feedback ? (
-              <p>“{feedback}”</p>
+              <blockquote>{feedback}</blockquote>
             ) : null}
             {state === "revoked" ? (
               <p>Maya closed this request. Its history remains available.</p>
@@ -269,43 +291,50 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
                 Recorded {formatDate(review.decidedAt)}
               </p>
             ) : null}
-            <Link className={styles.primaryButton} href="/reviews">
-              Back to review inbox
-            </Link>
           </section>
         ) : null}
 
         <section className={styles.history} aria-labelledby="history-title">
           <div className={styles.sectionHeading}>
             <p className={styles.eyebrow}>Earlier work</p>
-            <h2 id="history-title">Candidate history</h2>
+            <h2 id="history-title">Generated image history</h2>
           </div>
-          <ol>
-            {history.map((item) => (
-              <li key={item.attemptId}>
-                <Image
-                  src={item.imageUrl}
-                  alt={`Styled candidate version ${item.attemptNumber} for ${review.product.name}`}
-                  width={640}
-                  height={640}
-                  unoptimized
-                />
-                <div>
-                  <div className={styles.historyTitle}>
-                    <strong>Version {item.attemptNumber}</strong>
-                    <span>{statusLabels[item.state]}</span>
+          {history.length ? (
+            <ol>
+              {history.map((item) => (
+                <li key={item.attemptId}>
+                  <Image
+                    src={item.imageUrl}
+                    alt={`Generated image ${item.attemptNumber} for ${review.product.name}`}
+                    width={640}
+                    height={640}
+                    unoptimized
+                  />
+                  <div>
+                    <div className={styles.historyTitle}>
+                      <strong>Version {item.attemptNumber}</strong>
+                      <span>{statusLabels[item.state]}</span>
+                    </div>
+                    <p>{item.sceneDirection}</p>
+                    {item.feedback ? (
+                      <blockquote>“{item.feedback}”</blockquote>
+                    ) : null}
+                    <p className={styles.subtle}>
+                      {formatDate(item.decidedAt ?? item.createdAt)}
+                    </p>
                   </div>
-                  <p>{item.sceneDirection}</p>
-                  {item.feedback ? (
-                    <blockquote>“{item.feedback}”</blockquote>
-                  ) : null}
-                  <p className={styles.subtle}>
-                    {formatDate(item.decidedAt ?? item.createdAt)}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className={styles.historyEmpty}>
+              <ImageIconPlaceholder />
+              <p>
+                <strong>No earlier generated images</strong>
+                <span>This is the first image sent for review.</span>
+              </p>
+            </div>
+          )}
           {historyError ? (
             <p className={styles.error} role="alert">
               {historyError}
@@ -429,7 +458,7 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <p className={styles.eyebrow}>Final decision</p>
-            <h2 id="approve-title">Approve this candidate?</h2>
+            <h2 id="approve-title">Approve this generated image?</h2>
             <p>Maya will see it as approved and ready to use.</p>
             <div className={styles.sheetActions}>
               <button
@@ -458,10 +487,15 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
           className={styles.zoom}
           role="dialog"
           aria-modal="true"
-          aria-label="Candidate image inspection"
+          aria-label="Generated image inspection"
         >
-          <button type="button" onClick={() => setZoomOpen(false)}>
-            Close
+          <button
+            type="button"
+            onClick={() => setZoomOpen(false)}
+            aria-label="Close image inspection"
+            title="Close"
+          >
+            <X aria-hidden="true" />
           </button>
           <Image
             src={review.candidate.imageUrl}
@@ -474,4 +508,8 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
       ) : null}
     </main>
   );
+}
+
+function ImageIconPlaceholder() {
+  return <ImageIcon aria-hidden="true" className={styles.historyEmptyIcon} />;
 }

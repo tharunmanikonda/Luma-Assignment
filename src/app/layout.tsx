@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Maya Home Goods",
+  title: "Home Goods Studio",
   description: "Styled-image workflow foundation"
 };
 

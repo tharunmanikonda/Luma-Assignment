@@ -8,6 +8,7 @@
   --accent-strong: #173f37;
   --danger: #a43d32;
   --focus: #0f7a9b;
+  font-synthesis: none;
 }
 
 * {
@@ -26,6 +27,8 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
 }
 
 a {
@@ -33,8 +36,15 @@ a {
 }
 
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
 }
 
 :focus-visible {

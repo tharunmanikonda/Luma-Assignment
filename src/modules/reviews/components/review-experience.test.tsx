@@ -27,7 +27,7 @@ const pendingReview: ReviewReadModel = {
     sceneVersion: 2,
     sceneDirection: "Morning counter with soft window light.",
     imageUrl: "/api/assets/candidate/content",
-    imageAlt: "Styled candidate for Stoneware Mug"
+    imageAlt: "Generated image for Stoneware Mug"
   },
   source: {
     imageUrl: "/api/assets/source/content",
@@ -86,7 +86,7 @@ describe("ReviewExperience", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     expect(
-      screen.getByRole("dialog", { name: "Approve this candidate?" })
+      screen.getByRole("dialog", { name: "Approve this generated image?" })
     ).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Confirm approval" })

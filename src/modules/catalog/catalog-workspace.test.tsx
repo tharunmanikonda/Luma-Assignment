@@ -83,7 +83,62 @@ describe("CatalogWorkspace", () => {
     ).toBe("/api/assets/asset_123/content");
   });
 
-  it("requires quote review and uses a fresh key for another candidate", async () => {
+  it("keeps the operations overview stable when catalog filters change", async () => {
+    const setupProduct = {
+      ...productSummary,
+      id: "product_setup_123456789012345678",
+      name: "Linen Throw",
+      sku: "HG-003",
+      status: "needs_setup" as const,
+      statusLabel: "Needs setup",
+      nextAction: "Add scene direction"
+    };
+    const initialData = {
+      products: [setupProduct, productSummary],
+      counts: { all: 2, needs_setup: 1, ready_to_generate: 1 },
+      nextCursor: null
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/usage") {
+          return jsonResponse({
+            estimatedSpend: { amount: "0.0434", currency: "USD" },
+            attempts: { total: 1, successful: 1, failed: 0, active: 0 },
+            approvedImages: 0,
+            efficiency: { approvedPerAttempt: 0 }
+          });
+        }
+        if (url.includes("status=ready_to_generate")) {
+          return jsonResponse({
+            products: [productSummary],
+            counts: initialData.counts,
+            nextCursor: null
+          });
+        }
+        return jsonResponse(initialData);
+      })
+    );
+
+    render(
+      <CatalogWorkspace
+        actorName="Maya"
+        initialData={initialData}
+        accountControl={<button>Sign out</button>}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /Linen Throw/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Ready\s*1/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Linen Throw/ })).toBeTruthy()
+    );
+    expect(screen.getByText("$0.04")).toBeTruthy();
+  });
+
+  it("requires quote review and avoids repeat generation until the direction changes", async () => {
     let generationNumber = 0;
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -197,7 +252,7 @@ describe("CatalogWorkspace", () => {
 
     fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
     const reviewButton = await screen.findByRole("button", {
-      name: "Review generation quote"
+      name: "Generate image"
     });
     fireEvent.click(reviewButton);
 
@@ -213,40 +268,15 @@ describe("CatalogWorkspace", () => {
     ).toHaveLength(0);
 
     fireEvent.click(confirmButton);
-    await screen.findByText("1 candidate available");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Generate another candidate" })
-    );
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Confirm 0.0434 USD generation"
-      })
-    );
-
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.filter(
-          ([input, init]) =>
-            String(input).endsWith("/generation-attempts") &&
-            init?.method === "POST"
-        )
-      ).toHaveLength(2)
-    );
-    const generationCalls = fetchMock.mock.calls.filter(
-      ([input, init]) =>
-        String(input).endsWith("/generation-attempts") &&
-        init?.method === "POST"
-    );
-    expect(generationCalls).toHaveLength(2);
+    await screen.findByText("1 generated image available");
+    expect(screen.queryByRole("button", { name: "Generate image" })).toBeNull();
     expect(
-      (generationCalls[0][1]?.headers as Record<string, string>)[
-        "Idempotency-Key"
-      ]
-    ).not.toBe(
-      (generationCalls[1][1]?.headers as Record<string, string>)[
-        "Idempotency-Key"
-      ]
-    );
+      fetchMock.mock.calls.filter(
+        ([input, init]) =>
+          String(input).endsWith("/generation-attempts") &&
+          init?.method === "POST"
+      )
+    ).toHaveLength(1);
   });
 
   it("exposes catalog export and approved image downloads to Maya", async () => {
@@ -326,9 +356,7 @@ describe("CatalogWorkspace", () => {
     );
 
     expect(
-      screen
-        .getByRole("link", { name: "Export catalog status" })
-        .getAttribute("href")
+      screen.getByRole("link", { name: "Export" }).getAttribute("href")
     ).toBe("/api/exports/catalog.csv");
 
     fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
@@ -344,7 +372,7 @@ describe("CatalogWorkspace", () => {
     ).toBe("/api/assets/approved_asset/download");
     expect(
       screen.getByRole("img", {
-        name: "Stoneware Mug approved image, candidate 2"
+        name: "Stoneware Mug approved generated image 2"
       })
     ).toBeTruthy();
   });
@@ -368,7 +396,7 @@ describe("CatalogWorkspace", () => {
     expect(
       (
         await screen.findByRole("img", {
-          name: "Stoneware Mug generated candidate 1"
+          name: "Stoneware Mug generated image 1"
         })
       ).getAttribute("src")
     ).toBe("/api/assets/asset_candidate/content");
@@ -381,7 +409,7 @@ describe("CatalogWorkspace", () => {
 
     expect(
       await screen.findByRole("img", {
-        name: "Stoneware Mug generated candidate 1"
+        name: "Stoneware Mug generated image 1"
       })
     ).toBeTruthy();
     expect(
@@ -495,13 +523,11 @@ describe("CatalogWorkspace", () => {
     );
     expect(
       await screen.findByRole("img", {
-        name: "Stoneware Mug generated candidate 1"
+        name: "Stoneware Mug generated image 1"
       })
     ).toBeTruthy();
-    expect(screen.getByText(/Scene version 1.*Previous scene/)).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Review generation quote" })
-    ).toBeTruthy();
+    expect(screen.getByText(/Direction 1.*Previous scene/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate image" })).toBeTruthy();
   });
 
   it("lets Maya navigate, compare, and act on any generated candidate", async () => {
@@ -535,15 +561,15 @@ describe("CatalogWorkspace", () => {
 
     expect(
       await screen.findByRole("img", {
-        name: "Stoneware Mug generated candidate 2"
+        name: "Stoneware Mug generated image 2"
       })
     ).toBeTruthy();
     fireEvent.click(
-      screen.getByRole("button", { name: "Show previous candidate" })
+      screen.getByRole("button", { name: "Show previous generated image" })
     );
     expect(
       screen.getByRole("img", {
-        name: "Stoneware Mug generated candidate 1"
+        name: "Stoneware Mug generated image 1"
       })
     ).toBeTruthy();
     fireEvent.click(

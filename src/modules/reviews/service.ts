@@ -148,7 +148,7 @@ export class ReviewService {
         sceneVersion: review.sceneVersion,
         sceneDirection: review.sceneDirection,
         imageUrl: assetUrl(review.candidateAssetId),
-        imageAlt: `Styled candidate for ${review.productName}`
+        imageAlt: `Generated image for ${review.productName}`
       },
       source: {
         imageUrl: assetUrl(review.sourceAssetId),

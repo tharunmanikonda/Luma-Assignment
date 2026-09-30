@@ -5,7 +5,7 @@ export function ReviewUnavailable() {
   return (
     <main className={styles.unavailable}>
       <section>
-        <p className={styles.eyebrow}>Maya Home Goods</p>
+        <p className={styles.eyebrow}>Home Goods Studio</p>
         <h1>Review unavailable</h1>
         <p>
           This review may belong to another account or may no longer be

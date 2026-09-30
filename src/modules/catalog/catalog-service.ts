@@ -98,12 +98,12 @@ function summaryFromRow(row: {
           : row.latestReviewState === "approved"
             ? { label: "Approved", nextAction: "Download approved" }
             : row.attempts > 0
-              ? { label: "Generated", nextAction: "Review candidates" }
+              ? { label: "Generated", nextAction: "Review images" }
               : {
                   label: statusLabels[status],
                   nextAction:
                     status === "ready_to_generate"
-                      ? "Generate candidate"
+                      ? "Generate image"
                       : "Finish setup"
                 };
   return {

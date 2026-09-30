@@ -609,3 +609,201 @@
     grid-template-columns: 1fr;
   }
 }
+
+.header {
+  background: rgba(255, 255, 255, 0.96);
+  min-height: 58px;
+  padding: 9px max(20px, calc((100vw - 1120px) / 2));
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.backLink {
+  align-items: center;
+  border: 1px solid #d5ddd9;
+  border-radius: 6px;
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  max-width: none;
+  padding: 0;
+  width: 36px;
+}
+.brand {
+  font-size: 14px;
+}
+.status {
+  border-radius: 5px;
+}
+.hero,
+.details {
+  max-width: 1120px;
+}
+.identity h1 {
+  font-size: 24px;
+}
+.compareTabs {
+  background: #e9eeeb;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px;
+}
+.compareTabs button {
+  border-radius: 4px;
+  min-height: 34px;
+}
+.reviewImages {
+  gap: 12px;
+}
+.reviewFigure,
+.sourceImage {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  min-width: 0;
+}
+.reviewFigure > figcaption,
+.sourceImage > figcaption {
+  color: #53615d;
+  font-size: 12px;
+  font-weight: 750;
+  order: -1;
+  position: static;
+}
+.imageButton,
+.sourceImage {
+  border-radius: 7px;
+}
+.heroImage,
+.sourceImage img {
+  max-height: 560px;
+  object-fit: contain;
+}
+.zoomHint {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d5ddd9;
+  border-radius: 6px;
+  bottom: 10px;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  right: 10px;
+  top: auto;
+  width: 34px;
+}
+.imageLabel {
+  display: none;
+}
+.facts div,
+.sceneBlock,
+.completed,
+.history {
+  border-radius: 7px;
+}
+.completed {
+  border-left: 4px solid #5b8979;
+  padding: 14px 16px;
+}
+.history ol {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.primaryButton,
+.secondaryButton,
+.historyMore {
+  border-radius: 6px;
+}
+.sheet,
+.confirmDialog {
+  border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  .header {
+    padding: 9px 14px;
+  }
+  .hero,
+  .details {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .identity h1 {
+    font-size: 21px;
+  }
+  .heroImage,
+  .sourceImage img {
+    max-height: 390px;
+  }
+}
+
+.decisionRecordTitle {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+.decisionRecordTitle > svg {
+  color: #2f755d;
+  height: 20px;
+  width: 20px;
+}
+.decisionRecordTitle h2,
+.decisionRecordTitle p {
+  margin: 0;
+}
+.completed blockquote {
+  background: #fff;
+  border-left: 3px solid #c98b39;
+  color: #27332f;
+  margin: 12px 0;
+  padding: 10px 12px;
+}
+.historyEmpty {
+  align-items: center;
+  background: #f7f9f8;
+  border: 1px dashed #ccd6d1;
+  border-radius: 6px;
+  color: #64716d;
+  display: flex;
+  gap: 12px;
+  padding: 18px;
+}
+.historyEmpty p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.historyEmpty strong {
+  color: #293632;
+}
+.historyEmpty span {
+  font-size: 13px;
+}
+.historyEmptyIcon {
+  height: 24px;
+  width: 24px;
+}
+.zoom button {
+  align-items: center;
+  border-radius: 6px;
+  display: flex;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+  width: 38px;
+}
+.zoom button svg {
+  height: 19px;
+  width: 19px;
+}
+.srOnly {
+  clip: rect(0, 0, 0, 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
