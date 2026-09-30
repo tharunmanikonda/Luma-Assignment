@@ -186,6 +186,13 @@ class MemoryReviewStore implements ReviewStore {
       : null;
   }
 
+  async listForOperatorProduct(productId: string, workspaceId: string) {
+    return this.review.productId === productId &&
+      this.review.workspaceId === workspaceId
+      ? [this.review]
+      : [];
+  }
+
   async listHistory(
     _productId: string,
     throughAttemptNumber: number,
@@ -266,6 +273,20 @@ describe("ReviewService", () => {
     expect(result.history).toHaveLength(1);
     expect(result.history[0].feedback).toMatch(/glaze cooler/);
     expect(serialized).not.toMatch(/provider|cost|objectKey|internal/i);
+  });
+
+  it("lists the operator review status needed to restore a product panel", async () => {
+    const { service } = setup();
+    await expect(
+      service.listOperatorStatuses({ actor: maya, productId: "product_mug" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "review_1",
+        generationAttemptId: "attempt_2",
+        state: "pending",
+        reviewUrl: "http://localhost:3000/reviews/review_1"
+      })
+    ]);
   });
 
   it("paginates history in stable order without exposing future candidates", async () => {

@@ -136,6 +136,12 @@ describe("CatalogWorkspace", () => {
             JSON.stringify({
               attempt: {
                 id: "attempt_123",
+                attemptNumber: 1,
+                sceneBriefId: "scene_123",
+                sceneBriefVersion: 1,
+                promptText: "Morning kitchen counter",
+                outputAssetId: null,
+                createdAt: "2026-09-29T00:15:00.000Z",
                 status: "queued",
                 customerState: {
                   label: "Waiting",
@@ -314,4 +320,257 @@ describe("CatalogWorkspace", () => {
       })
     ).toBeTruthy();
   });
+
+  it("restores a generated candidate after the product panel is closed and reopened", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/generation-attempts")) {
+        return jsonResponse({ attempts: [successfulAttempt()] });
+      }
+      if (url === `/api/products/${productSummary.id}`) {
+        return jsonResponse(productDetail());
+      }
+      return jsonResponse(emptyProductList());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+
+    expect(
+      (
+        await screen.findByRole("img", {
+          name: "Stoneware Mug generated candidate 1"
+        })
+      ).getAttribute("src")
+    ).toBe("/api/assets/asset_candidate/content");
+    expect(
+      screen.queryByRole("button", { name: "Review generation quote" })
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+
+    expect(
+      await screen.findByRole("img", {
+        name: "Stoneware Mug generated candidate 1"
+      })
+    ).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).endsWith("/generation-attempts")
+      )
+    ).toHaveLength(2);
+  });
+
+  it("sends one generated candidate to Ellie and exposes review actions", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (
+          url.endsWith("/attempt_1/review-requests") &&
+          init?.method === "POST"
+        ) {
+          return jsonResponse(pendingReview(), 201);
+        }
+        if (url.endsWith("/generation-attempts")) {
+          return jsonResponse({ attempts: [successfulAttempt()] });
+        }
+        if (url === `/api/products/${productSummary.id}`) {
+          return jsonResponse(productDetail());
+        }
+        return jsonResponse(emptyProductList());
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Send to Ellie" })
+    );
+
+    expect(await screen.findByText("Waiting for Ellie")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: "Open review link" })
+        .getAttribute("href")
+    ).toBe("http://localhost:3000/reviews/review_1");
+    expect(screen.getByRole("button", { name: "Revoke review" })).toBeTruthy();
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input).endsWith("/attempt_1/review-requests") &&
+        init?.method === "POST"
+    );
+    expect(createCall?.[1]?.headers).toEqual(
+      expect.objectContaining({ "Idempotency-Key": expect.any(String) })
+    );
+  });
+
+  it("links requested changes to the new scene and keeps the old candidate in history", async () => {
+    let saved = false;
+    let sceneRequest: { basedOnReviewId?: string | null } | null = null;
+    const reviewedAttempt = successfulAttempt({
+      review: {
+        ...pendingReview(),
+        state: "changes_requested",
+        feedback: "Use cooler light and less reflection.",
+        decidedAt: "2026-09-29T01:00:00.000Z"
+      }
+    });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/scene-briefs") && init?.method === "POST") {
+          sceneRequest = JSON.parse(String(init.body));
+          saved = true;
+          return jsonResponse({ id: "scene_2", version: 2 }, 201);
+        }
+        if (url.endsWith("/generation-attempts")) {
+          return jsonResponse({ attempts: [reviewedAttempt] });
+        }
+        if (url === `/api/products/${productSummary.id}`) {
+          return jsonResponse(
+            saved
+              ? productDetail({
+                  sceneBriefId: "scene_2",
+                  sceneVersion: 2,
+                  sceneText: "Cool daylight with a quiet stone background"
+                })
+              : productDetail()
+          );
+        }
+        return jsonResponse(emptyProductList());
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Revise scene from feedback"
+      })
+    );
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Cool daylight with a quiet stone background" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save scene" }));
+
+    await waitFor(() =>
+      expect(sceneRequest).toEqual({
+        scene: "Cool daylight with a quiet stone background",
+        basedOnReviewId: "review_1"
+      })
+    );
+    expect(await screen.findByText("Previous generated images")).toBeTruthy();
+    expect(screen.getByText("Scene version 1 · Previous scene")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Review generation quote" })
+    ).toBeTruthy();
+  });
 });
+
+const productSummary = {
+  id: "product_123456789012345678901234",
+  sku: "HG-002",
+  name: "Stoneware Mug",
+  category: "Ceramics",
+  updatedAt: "2026-09-29T00:00:00.000Z",
+  sourceStatus: "ready" as const,
+  sourceUrl: "/api/assets/asset_source/content",
+  sceneSummary: "Morning kitchen counter",
+  status: "ready_to_generate" as const,
+  statusLabel: "Ready to generate",
+  attempts: 1,
+  nextAction: "Review product"
+};
+
+function emptyProductList() {
+  return {
+    products: [],
+    counts: { all: 0, needs_setup: 0, ready_to_generate: 0 },
+    nextCursor: null
+  };
+}
+
+function productDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    id: productSummary.id,
+    sku: productSummary.sku,
+    name: productSummary.name,
+    category: productSummary.category,
+    colorFinish: "White",
+    material: "Stoneware",
+    priceMinor: 3200,
+    currency: "USD",
+    notes: null,
+    sourceAssetId: "asset_source",
+    sourceStatus: "ready",
+    sourceUrl: "/api/assets/asset_source/content",
+    sourceFailure: null,
+    sceneBriefId: "scene_1",
+    sceneText: "Morning kitchen counter",
+    sceneVersion: 1,
+    statusLabel: "Ready to generate",
+    readyToGenerate: true,
+    approvedOutputs: [],
+    history: [],
+    ...overrides
+  };
+}
+
+function pendingReview() {
+  return {
+    id: "review_1",
+    generationAttemptId: "attempt_1",
+    state: "pending" as const,
+    feedback: null,
+    createdAt: "2026-09-29T00:30:00.000Z",
+    decidedAt: null,
+    revokedAt: null,
+    reviewUrl: "http://localhost:3000/reviews/review_1"
+  };
+}
+
+function successfulAttempt(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "attempt_1",
+    attemptNumber: 1,
+    sceneBriefId: "scene_1",
+    sceneBriefVersion: 1,
+    promptText: "Morning kitchen counter",
+    outputAssetId: "asset_candidate",
+    createdAt: "2026-09-29T00:15:00.000Z",
+    status: "succeeded" as const,
+    customerState: {
+      label: "Ready to review",
+      terminal: true,
+      nextAction: null
+    },
+    failure: null,
+    review: null,
+    ...overrides
+  };
+}
+
+function jsonResponse(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}
+
+function renderWorkspace() {
+  return render(
+    <CatalogWorkspace
+      actorName="Maya"
+      initialData={{
+        products: [productSummary],
+        counts: { all: 1, needs_setup: 0, ready_to_generate: 1 },
+        nextCursor: null
+      }}
+      accountControl={<button>Sign out</button>}
+    />
+  );
+}

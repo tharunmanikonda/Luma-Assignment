@@ -83,6 +83,8 @@
 .panelSection h3,
 .sceneEditor h3,
 .notes h3,
+.candidateSection h3,
+.candidateHistory h3,
 .approvedImages h3,
 .timeline h3 {
   letter-spacing: 0;
@@ -442,6 +444,8 @@
 .sceneEditor,
 .generationPanel,
 .notes,
+.candidateSection,
+.candidateHistory,
 .approvedImages,
 .timeline {
   border-bottom: 1px solid #d8dfda;
@@ -452,6 +456,8 @@
 .sceneEditor h3,
 .generationPanel h3,
 .notes h3,
+.candidateSection h3,
+.candidateHistory h3,
 .approvedImages h3,
 .timeline h3 {
   font-size: 18px;
@@ -694,6 +700,66 @@
   margin-top: 16px;
 }
 
+.candidateSection {
+  display: grid;
+  gap: 16px;
+}
+
+.candidateImage {
+  aspect-ratio: 4 / 3;
+  background: #eef1ed;
+  display: block;
+  max-height: 560px;
+  object-fit: contain;
+  width: 100%;
+}
+
+.candidateSection > .primaryButton {
+  justify-self: start;
+}
+
+.historyGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.historyGrid article {
+  border: 1px solid #d8dfda;
+  min-width: 0;
+}
+
+.historyGrid img,
+.historyImageError {
+  aspect-ratio: 4 / 3;
+  background: #eef1ed;
+  display: block;
+  object-fit: contain;
+  width: 100%;
+}
+
+.historyImageError {
+  align-items: center;
+  color: #68736f;
+  display: flex;
+  font-size: 12px;
+  justify-content: center;
+}
+
+.historyGrid article > div:last-child {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.historyGrid span {
+  color: #68736f;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-transform: capitalize;
+}
+
 .approvedGrid article {
   align-items: center;
   border: 1px solid #d8dfda;
@@ -918,5 +984,9 @@
 
   .sourceStage {
     min-height: 260px;
+  }
+
+  .historyGrid {
+    grid-template-columns: 1fr;
   }
 }

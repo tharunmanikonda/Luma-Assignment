@@ -38,6 +38,10 @@ export interface ReviewStore {
     reviewId: string,
     workspaceId: string
   ): Promise<ReviewRecord | null>;
+  listForOperatorProduct(
+    productId: string,
+    workspaceId: string
+  ): Promise<ReviewRecord[]>;
   listHistory(
     productId: string,
     throughAttemptNumber: number,
@@ -414,6 +418,16 @@ export class PostgresReviewStore implements ReviewStore {
       [reviewId, workspaceId]
     );
     return firstReview(result.rows) ?? null;
+  }
+
+  async listForOperatorProduct(productId: string, workspaceId: string) {
+    const result = await getPool().query(
+      `select ${reviewColumns} from review_requests
+       where product_id = $1 and workspace_id = $2
+       order by attempt_number asc, id asc`,
+      [productId, workspaceId]
+    );
+    return result.rows as ReviewRecord[];
   }
 
   async listHistory(

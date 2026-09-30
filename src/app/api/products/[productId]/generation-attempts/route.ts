@@ -8,6 +8,7 @@ import {
   getGenerationRepository,
   getGenerationService
 } from "@/modules/generation/runtime";
+import { getReviewService } from "@/modules/reviews/service";
 
 const bodySchema = z.object({
   sourceAssetId: z.string().min(1),
@@ -58,16 +59,22 @@ export async function GET(
   return generationApi(async () => {
     const actor = await requireOperator();
     const { productId } = await params;
-    const attempts = await getGenerationRepository().listAttempts(
-      actor.workspaceId,
-      productId
+    const [attempts, reviews] = await Promise.all([
+      getGenerationRepository().listAttempts(actor.workspaceId, productId),
+      getReviewService().listOperatorStatuses({ actor, productId })
+    ]);
+    const reviewsByAttempt = new Map(
+      reviews.map((review) => [review.generationAttemptId, review])
     );
     const estimatedPriceMicros = attempts.reduce(
       (sum, attempt) => sum + attempt.estimatedPriceMicros,
       0
     );
     return NextResponse.json({
-      attempts: attempts.map(presentAttempt),
+      attempts: attempts.map((attempt) => ({
+        ...presentAttempt(attempt),
+        review: reviewsByAttempt.get(attempt.id) ?? null
+      })),
       estimatedUsage: {
         amount: (estimatedPriceMicros / 1_000_000).toFixed(4),
         currency: "USD"

@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState
 } from "react";
+import { MayaReviewStatus } from "@/modules/reviews/components/maya-review-status";
 import styles from "./catalog-workspace.module.css";
 
 type ProductSummary = {
@@ -71,6 +72,12 @@ type GenerationQuote = {
 
 type GenerationAttempt = {
   id: string;
+  attemptNumber: number;
+  sceneBriefId: string;
+  sceneBriefVersion: number;
+  promptText: string;
+  outputAssetId: string | null;
+  createdAt: string;
   status:
     | "pending"
     | "submitting"
@@ -86,6 +93,18 @@ type GenerationAttempt = {
     nextAction: string | null;
   };
   failure: { message: string } | null;
+  review: ReviewStatus | null;
+};
+
+type ReviewStatus = {
+  id: string;
+  generationAttemptId: string;
+  state: "pending" | "approved" | "changes_requested" | "revoked";
+  feedback: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  revokedAt: string | null;
+  reviewUrl: string;
 };
 
 type PreviewItem = {
@@ -421,20 +440,42 @@ function ProductPanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [quote, setQuote] = useState<GenerationQuote | null>(null);
-  const [attempt, setAttempt] = useState<GenerationAttempt | null>(null);
+  const [attempts, setAttempts] = useState<GenerationAttempt[]>([]);
+  const [workflowLoading, setWorkflowLoading] = useState(true);
   const [generationBusy, setGenerationBusy] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(
     null
   );
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
+  const [revisionReviewId, setRevisionReviewId] = useState<string | null>(null);
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const generationKey = useRef(crypto.randomUUID());
+  const reviewKeys = useRef(new Map<string, string>());
+  const revokeKeys = useRef(new Map<string, string>());
+  const sceneInput = useRef<HTMLTextAreaElement>(null);
+
+  const loadAttempts = useCallback(async () => {
+    const result = await readJson<{ attempts?: GenerationAttempt[] }>(
+      await fetch(`/api/products/${productId}/generation-attempts`, {
+        cache: "no-store"
+      })
+    );
+    setAttempts(result.attempts ?? []);
+    return result.attempts ?? [];
+  }, [productId]);
 
   const load = useCallback(
     async (clearMessage = true) => {
       if (clearMessage) setMessage(null);
+      setWorkflowLoading(true);
       try {
-        const next = await readJson<ProductDetail>(
-          await fetch(`/api/products/${productId}`, { cache: "no-store" })
-        );
+        const [next] = await Promise.all([
+          readJson<ProductDetail>(
+            await fetch(`/api/products/${productId}`, { cache: "no-store" })
+          ),
+          loadAttempts()
+        ]);
         setProduct(next);
         setScene(next.sceneText ?? "");
       } catch (error) {
@@ -443,32 +484,87 @@ function ProductPanel({
             ? error.message
             : "Product could not be loaded."
         );
+      } finally {
+        setWorkflowLoading(false);
       }
     },
-    [productId]
+    [loadAttempts, productId]
   );
 
   useEffect(() => void load(), [load]);
 
   useEffect(() => {
     setQuote(null);
-    setAttempt(null);
+    setAttempts([]);
     setGenerationMessage(null);
+    setReviewMessage(null);
+    setRevisionReviewId(null);
+    setBrokenImages(new Set());
     generationKey.current = crypto.randomUUID();
   }, [productId]);
 
+  const currentSceneAttempts = useMemo(
+    () =>
+      attempts.filter(
+        (candidate) => candidate.sceneBriefId === product?.sceneBriefId
+      ),
+    [attempts, product?.sceneBriefId]
+  );
+  const currentCandidate = useMemo(
+    () =>
+      [...currentSceneAttempts]
+        .reverse()
+        .find(
+          (candidate) =>
+            candidate.status === "succeeded" && candidate.outputAssetId
+        ) ?? null,
+    [currentSceneAttempts]
+  );
+  const activeAttempt = useMemo(
+    () =>
+      [...currentSceneAttempts]
+        .reverse()
+        .find((candidate) => !candidate.customerState.terminal) ?? null,
+    [currentSceneAttempts]
+  );
+  const latestCurrentAttempt = currentSceneAttempts.at(-1) ?? null;
+  const previousCandidates = useMemo(
+    () =>
+      attempts
+        .filter(
+          (candidate) =>
+            candidate.status === "succeeded" &&
+            candidate.outputAssetId &&
+            candidate.id !== currentCandidate?.id
+        )
+        .reverse(),
+    [attempts, currentCandidate?.id]
+  );
+  const actionableReview = useMemo(
+    () =>
+      [...currentSceneAttempts]
+        .reverse()
+        .map((candidate) => candidate.review)
+        .find((review) => review?.state === "changes_requested") ?? null,
+    [currentSceneAttempts]
+  );
+
   useEffect(() => {
-    if (!attempt || attempt.customerState.terminal) return;
+    const shouldPoll =
+      attempts.some((candidate) => !candidate.customerState.terminal) ||
+      attempts.some((candidate) => candidate.review?.state === "pending");
+    if (!shouldPoll) return;
     const timer = window.setInterval(async () => {
       try {
-        const next = await readJson<{ attempt: GenerationAttempt }>(
-          await fetch(`/api/generation-attempts/${attempt.id}`, {
-            cache: "no-store"
-          })
+        const previousActive = attempts.some(
+          (candidate) => !candidate.customerState.terminal
         );
-        setAttempt(next.attempt);
-        if (next.attempt.customerState.terminal) {
-          await load(false);
+        const next = await loadAttempts();
+        if (
+          previousActive &&
+          !next.some((candidate) => !candidate.customerState.terminal)
+        ) {
+          setGenerationMessage(null);
           onSaved();
         }
       } catch (error) {
@@ -478,27 +574,32 @@ function ProductPanel({
             : "Generation status could not be refreshed."
         );
       }
-    }, 2000);
+    }, 2500);
     return () => window.clearInterval(timer);
-  }, [attempt, load, onSaved]);
+  }, [attempts, loadAttempts, onSaved]);
 
   async function save() {
     setBusy(true);
     setMessage(null);
     try {
+      const basedOnReviewId = revisionReviewId ?? actionableReview?.id ?? null;
       await readJson(
         await fetch(`/api/products/${productId}/scene-briefs`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ scene, basedOnReviewId: null })
+          body: JSON.stringify({ scene, basedOnReviewId })
         })
       );
       setQuote(null);
-      setAttempt(null);
       setGenerationMessage(null);
+      setRevisionReviewId(null);
       generationKey.current = crypto.randomUUID();
       await load(false);
-      setMessage("Scene saved. No image was created and no budget was used.");
+      setMessage(
+        basedOnReviewId
+          ? "Revision saved from Ellie's feedback. No image was created and no budget was used."
+          : "Scene saved. No image was created and no budget was used."
+      );
       onSaved();
     } catch (error) {
       setMessage(
@@ -563,7 +664,10 @@ function ProductPanel({
           })
         })
       );
-      setAttempt(result.attempt);
+      setAttempts((current) => [
+        ...current.filter((candidate) => candidate.id !== result.attempt.id),
+        { ...result.attempt, review: result.attempt.review ?? null }
+      ]);
       setQuote(null);
       setGenerationMessage(
         "Generation confirmed. The worker is preparing your image."
@@ -577,6 +681,84 @@ function ProductPanel({
     } finally {
       setGenerationBusy(false);
     }
+  }
+
+  async function sendToEllie(candidate: GenerationAttempt) {
+    setReviewBusy(true);
+    setReviewMessage(null);
+    let key = reviewKeys.current.get(candidate.id);
+    if (!key) {
+      key = crypto.randomUUID();
+      reviewKeys.current.set(candidate.id, key);
+    }
+    try {
+      const review = await readJson<ReviewStatus>(
+        await fetch(
+          `/api/generation-attempts/${candidate.id}/review-requests`,
+          {
+            method: "POST",
+            headers: { "Idempotency-Key": key }
+          }
+        )
+      );
+      setAttempts((current) =>
+        current.map((attempt) =>
+          attempt.id === candidate.id ? { ...attempt, review } : attempt
+        )
+      );
+      setReviewMessage("Candidate sent to Ellie for review.");
+    } catch (error) {
+      setReviewMessage(
+        error instanceof Error ? error.message : "Review could not be created."
+      );
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function revokeReview(review: ReviewStatus) {
+    setReviewBusy(true);
+    setReviewMessage(null);
+    let key = revokeKeys.current.get(review.id);
+    if (!key) {
+      key = crypto.randomUUID();
+      revokeKeys.current.set(review.id, key);
+    }
+    try {
+      const next = await readJson<ReviewStatus>(
+        await fetch(`/api/review-requests/${review.id}/revoke`, {
+          method: "POST",
+          headers: { "Idempotency-Key": key }
+        })
+      );
+      setAttempts((current) =>
+        current.map((candidate) =>
+          candidate.id === next.generationAttemptId
+            ? { ...candidate, review: next }
+            : candidate
+        )
+      );
+      setReviewMessage("Review request revoked.");
+    } catch (error) {
+      setReviewMessage(
+        error instanceof Error ? error.message : "Review could not be revoked."
+      );
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function copyReviewLink(reviewUrl: string) {
+    try {
+      await navigator.clipboard.writeText(reviewUrl);
+      setReviewMessage("Review link copied.");
+    } catch {
+      setReviewMessage("The review link could not be copied. Open it instead.");
+    }
+  }
+
+  function markImageBroken(assetId: string) {
+    setBrokenImages((current) => new Set(current).add(assetId));
   }
 
   return (
@@ -632,6 +814,7 @@ function ProductPanel({
               <h3>Describe the finished product photo</h3>
             </div>
             <textarea
+              ref={sceneInput}
               value={scene}
               onChange={(event) => setScene(event.target.value)}
               rows={6}
@@ -654,7 +837,8 @@ function ProductPanel({
             {message ? (
               <p
                 className={
-                  message.startsWith("Scene saved")
+                  message.startsWith("Scene saved") ||
+                  message.startsWith("Revision saved")
                     ? styles.success
                     : styles.error
                 }
@@ -668,20 +852,24 @@ function ProductPanel({
               <p className={styles.eyebrow}>Image generation</p>
               <h3>Create one candidate</h3>
             </div>
-            {!product.readyToGenerate ? (
+            {workflowLoading ? (
+              <p className={styles.notice}>Loading generation history...</p>
+            ) : !product.readyToGenerate ? (
               <p className={styles.notice}>
                 A ready source photo and saved scene are required.
               </p>
-            ) : attempt ? (
+            ) : activeAttempt ? (
               <div className={styles.generationStatus}>
-                <strong>{attempt.customerState.label}</strong>
+                <strong>{activeAttempt.customerState.label}</strong>
                 <p>
-                  {attempt.customerState.nextAction ??
-                    (attempt.customerState.terminal
-                      ? "The generation attempt is complete."
-                      : "You can leave this panel open while the worker runs.")}
+                  {activeAttempt.customerState.nextAction ??
+                    "You can close this panel. Progress will resume here when you return."}
                 </p>
               </div>
+            ) : currentCandidate ? (
+              <p className={styles.success}>
+                Candidate {currentCandidate.attemptNumber} is ready below.
+              </p>
             ) : quote ? (
               <div className={styles.quoteConfirmation}>
                 <div>
@@ -717,6 +905,21 @@ function ProductPanel({
                   </button>
                 </div>
               </div>
+            ) : latestCurrentAttempt?.status === "failed" ? (
+              <div className={styles.generationStatus}>
+                <strong>{latestCurrentAttempt.customerState.label}</strong>
+                <p>
+                  {latestCurrentAttempt.customerState.nextAction ??
+                    "Review the scene and try again deliberately."}
+                </p>
+                <button
+                  className={styles.primaryButton}
+                  onClick={reviewQuote}
+                  disabled={generationBusy}
+                >
+                  {generationBusy ? "Loading quote..." : "Review a new quote"}
+                </button>
+              </div>
             ) : (
               <button
                 className={styles.primaryButton}
@@ -731,15 +934,156 @@ function ProductPanel({
             {generationMessage ? (
               <p
                 className={
-                  attempt && attempt.status !== "failed"
-                    ? styles.success
-                    : styles.error
+                  generationMessage.includes("could not")
+                    ? styles.error
+                    : styles.success
                 }
               >
                 {generationMessage}
               </p>
             ) : null}
           </section>
+          {currentCandidate?.outputAssetId ? (
+            <section className={styles.candidateSection}>
+              <div>
+                <p className={styles.eyebrow}>Current candidate</p>
+                <h3>Candidate {currentCandidate.attemptNumber}</h3>
+                <p className={styles.help}>
+                  Scene version {currentCandidate.sceneBriefVersion}
+                </p>
+              </div>
+              {brokenImages.has(currentCandidate.outputAssetId) ? (
+                <p className={styles.error}>
+                  The generated image could not be loaded. Refresh the panel or
+                  check the stored asset.
+                </p>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  className={styles.candidateImage}
+                  src={`/api/assets/${encodeURIComponent(currentCandidate.outputAssetId)}/content`}
+                  alt={`${product.name} generated candidate ${currentCandidate.attemptNumber}`}
+                  onError={() =>
+                    markImageBroken(currentCandidate.outputAssetId!)
+                  }
+                />
+              )}
+              {currentCandidate.review ? (
+                <>
+                  <MayaReviewStatus
+                    state={currentCandidate.review.state}
+                    feedback={currentCandidate.review.feedback}
+                    reviewUrl={currentCandidate.review.reviewUrl}
+                    createdAt={currentCandidate.review.createdAt}
+                  />
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.secondaryButton}
+                      onClick={() =>
+                        void copyReviewLink(currentCandidate.review!.reviewUrl)
+                      }
+                      disabled={reviewBusy}
+                    >
+                      Copy review link
+                    </button>
+                    {currentCandidate.review.state === "pending" ? (
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={() =>
+                          void revokeReview(currentCandidate.review!)
+                        }
+                        disabled={reviewBusy}
+                      >
+                        {reviewBusy ? "Updating..." : "Revoke review"}
+                      </button>
+                    ) : null}
+                    {currentCandidate.review.state === "changes_requested" ? (
+                      <button
+                        className={styles.primaryButton}
+                        onClick={() => {
+                          setRevisionReviewId(currentCandidate.review!.id);
+                          sceneInput.current?.focus();
+                          sceneInput.current?.scrollIntoView?.({
+                            behavior: "smooth",
+                            block: "center"
+                          });
+                        }}
+                      >
+                        Revise scene from feedback
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <button
+                  className={styles.primaryButton}
+                  onClick={() => void sendToEllie(currentCandidate)}
+                  disabled={reviewBusy}
+                >
+                  {reviewBusy ? "Sending..." : "Send to Ellie"}
+                </button>
+              )}
+              {revisionReviewId === currentCandidate.review?.id ? (
+                <p className={styles.notice}>
+                  Your next saved scene will be linked to Ellie&apos;s feedback.
+                </p>
+              ) : null}
+              {reviewMessage ? (
+                <p
+                  className={
+                    reviewMessage.includes("could not")
+                      ? styles.error
+                      : styles.success
+                  }
+                >
+                  {reviewMessage}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+          {previousCandidates.length ? (
+            <section className={styles.candidateHistory}>
+              <div>
+                <p className={styles.eyebrow}>Candidate history</p>
+                <h3>Previous generated images</h3>
+              </div>
+              <div className={styles.historyGrid}>
+                {previousCandidates.map((candidate) => (
+                  <article key={candidate.id}>
+                    {candidate.outputAssetId &&
+                    !brokenImages.has(candidate.outputAssetId) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/assets/${encodeURIComponent(candidate.outputAssetId)}/content`}
+                        alt={`${product.name} previous generated candidate ${candidate.attemptNumber}`}
+                        onError={() =>
+                          markImageBroken(candidate.outputAssetId!)
+                        }
+                      />
+                    ) : (
+                      <div className={styles.historyImageError}>
+                        Image unavailable
+                      </div>
+                    )}
+                    <div>
+                      <strong>Candidate {candidate.attemptNumber}</strong>
+                      <span>
+                        Scene version {candidate.sceneBriefVersion}
+                        {candidate.sceneBriefId !== product.sceneBriefId
+                          ? " · Previous scene"
+                          : " · Earlier candidate"}
+                      </span>
+                      <span>
+                        {candidate.review
+                          ? candidate.review.state.replace("_", " ")
+                          : "Not sent for review"}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {product.notes ? (
             <section className={styles.notes}>
               <h3>Imported notes</h3>

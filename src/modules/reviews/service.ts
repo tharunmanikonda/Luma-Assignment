@@ -207,6 +207,17 @@ export class ReviewService {
     return toMutationResult(review, this.appOrigin);
   }
 
+  async listOperatorStatuses(input: { actor: ReviewActor; productId: string }) {
+    if (input.actor.role !== "operator") {
+      throw new ReviewError("NOT_FOUND", "Reviews not found.", 404);
+    }
+    const reviews = await this.store.listForOperatorProduct(
+      input.productId,
+      input.actor.workspaceId
+    );
+    return reviews.map((review) => toMutationResult(review, this.appOrigin));
+  }
+
   async getRevisionContext(input: { actor: ReviewActor; reviewId: string }) {
     if (input.actor.role !== "operator") {
       throw new ReviewError("NOT_FOUND", "Review not found.", 404);
