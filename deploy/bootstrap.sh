@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/opt/luma}"
-SITE_ADDRESS="${SITE_ADDRESS:-http://192.241.148.87}"
+SITE_ADDRESS="${SITE_ADDRESS:-https://luma.192-241-148-87.sslip.io}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run this script as root." >&2
