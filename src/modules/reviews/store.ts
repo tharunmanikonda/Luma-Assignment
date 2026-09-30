@@ -34,6 +34,7 @@ export interface ReviewStore {
     reviewId: string,
     approverUserId: string
   ): Promise<ReviewRecord | null>;
+  listAssigned(approverUserId: string): Promise<ReviewRecord[]>;
   findForOperator(
     reviewId: string,
     workspaceId: string
@@ -409,6 +410,19 @@ export class PostgresReviewStore implements ReviewStore {
       [reviewId, approverUserId]
     );
     return firstReview(result.rows) ?? null;
+  }
+
+  async listAssigned(approverUserId: string) {
+    const result = await getPool().query(
+      `select ${reviewColumns} from review_requests
+       where approver_user_id = $1
+       order by
+         case state when 'pending' then 0 else 1 end,
+         created_at desc,
+         id desc`,
+      [approverUserId]
+    );
+    return result.rows as ReviewRecord[];
   }
 
   async findForOperator(reviewId: string, workspaceId: string) {

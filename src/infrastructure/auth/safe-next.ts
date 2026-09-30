@@ -4,7 +4,7 @@ export function safeNext(value: FormDataEntryValue | null): string {
     !value.startsWith("/") ||
     value.startsWith("//")
   ) {
-    return "/app";
+    return "/";
   }
 
   return value;

@@ -2,7 +2,7 @@ import { SignInForm } from "./sign-in-form";
 
 function safeNext(next?: string | string[]) {
   const value = Array.isArray(next) ? next[0] : next;
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/app";
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
   return value;
 }
 

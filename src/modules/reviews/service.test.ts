@@ -179,6 +179,10 @@ class MemoryReviewStore implements ReviewStore {
       : null;
   }
 
+  async listAssigned(approverUserId: string) {
+    return approverUserId === this.review.approverUserId ? [this.review] : [];
+  }
+
   async findForOperator(reviewId: string, workspaceId: string) {
     return reviewId === this.review.id &&
       workspaceId === this.review.workspaceId
@@ -441,4 +445,19 @@ describe("ReviewService", () => {
       feedback: "Reduce the orange cast."
     });
   });
+});
+it("lists Ellie's assigned candidates for her review inbox", async () => {
+  const { service } = setup();
+  await expect(service.listAssignedReviews({ actor: ellie })).resolves.toEqual([
+    expect.objectContaining({
+      id: "review_1",
+      state: "pending",
+      productName: "Stoneware Mug",
+      sku: "HG-002",
+      imageUrl: "/api/assets/asset_candidate_2/content"
+    })
+  ]);
+  await expect(
+    service.listAssignedReviews({ actor: maya })
+  ).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
 });

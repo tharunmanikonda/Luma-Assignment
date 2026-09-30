@@ -195,6 +195,25 @@ export class ReviewService {
     return toMutationResult(review, this.appOrigin);
   }
 
+  async listAssignedReviews(input: { actor: ReviewActor }) {
+    if (input.actor.role !== "approver") {
+      throw new ReviewError("NOT_FOUND", "Reviews unavailable.", 404);
+    }
+    const reviews = await this.store.listAssigned(input.actor.id);
+    return reviews.map((review) => ({
+      id: review.id,
+      state: review.state,
+      productName: review.productName,
+      sku: review.sku,
+      attemptNumber: review.attemptNumber,
+      sceneVersion: review.sceneVersion,
+      sceneDirection: review.sceneDirection,
+      imageUrl: assetUrl(review.candidateAssetId),
+      createdAt: review.createdAt.toISOString(),
+      decidedAt: review.decidedAt?.toISOString() ?? null
+    }));
+  }
+
   async readOperatorStatus(input: { actor: ReviewActor; reviewId: string }) {
     if (input.actor.role !== "operator") {
       throw new ReviewError("NOT_FOUND", "Review not found.", 404);

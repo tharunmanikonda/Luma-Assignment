@@ -14,10 +14,10 @@ describe("authorization helpers", () => {
   it.each([
     ["/app", "/app"],
     ["/reviews/rev_1?view=proof", "/reviews/rev_1?view=proof"],
-    ["https://attacker.example", "/app"],
-    ["//attacker.example", "/app"],
-    ["app", "/app"],
-    [null, "/app"]
+    ["https://attacker.example", "/"],
+    ["//attacker.example", "/"],
+    ["app", "/"],
+    [null, "/"]
   ])("normalizes return path %s", (value, expected) => {
     expect(safeNext(value)).toBe(expected);
   });

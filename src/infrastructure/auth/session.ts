@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppError } from "@/shared/errors";
 import { auth } from "./auth";
+import { roleHomePath } from "./role-home";
 
 export type ActorRole = "operator" | "approver";
 
@@ -54,8 +55,8 @@ export async function requireOperator(): Promise<Actor> {
 
 export async function requireRolePage(role: ActorRole) {
   const actor = await getSessionActor();
-  if (!actor) redirect(`/sign-in?next=${role === "operator" ? "/app" : "/"}`);
-  if (!hasRole(actor, role)) redirect("/access-denied");
+  if (!actor) redirect(`/sign-in?next=${roleHomePath(role)}`);
+  if (!hasRole(actor, role)) redirect(roleHomePath(actor.role));
   return actor;
 }
 
