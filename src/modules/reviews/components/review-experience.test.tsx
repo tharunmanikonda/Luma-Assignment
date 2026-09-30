@@ -68,10 +68,29 @@ describe("ReviewExperience", () => {
     expect(
       screen.getByRole("button", { name: "Request changes" })
     ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Compare" })).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: "View original" }).getAttribute("href")
-    ).toBe("#original");
+      screen.getByRole("img", {
+        name: "Original product photo of Stoneware Mug"
+      })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Back to inbox" }).getAttribute("href")
+    ).toBe("/reviews");
     expect(screen.getByText(/Reduce the orange cast/)).toBeTruthy();
+  });
+
+  it("uses an in-app approval confirmation", () => {
+    render(<ReviewExperience review={pendingReview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Approve this candidate?" })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Confirm approval" })
+    ).toBeTruthy();
   });
 
   it("prevents empty change feedback before making a request", () => {

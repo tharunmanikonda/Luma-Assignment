@@ -14,6 +14,11 @@ export type FakeLumaScenario =
   | "output_download_failure"
   | "expired_output_refresh";
 
+const fakePng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
+
 export class FakeLumaGateway implements LumaGateway {
   readonly submissions: string[] = [];
   readonly polls: string[] = [];
@@ -109,7 +114,7 @@ export class FakeLumaGateway implements LumaGateway {
       );
     }
     return {
-      bytes: new TextEncoder().encode("fake-image-bytes"),
+      bytes: new Uint8Array(fakePng),
       contentType: "image/png"
     };
   }

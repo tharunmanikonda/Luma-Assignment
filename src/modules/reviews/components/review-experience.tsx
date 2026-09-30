@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { ReviewReadModel, ReviewState } from "../domain";
@@ -30,7 +31,11 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
   const [state, setState] = useState(review.state);
   const [feedback, setFeedback] = useState(review.feedback ?? "");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [compareMode, setCompareMode] = useState<
+    "candidate" | "source" | "compare"
+  >("compare");
   const [pending, setPending] = useState(false);
   const [historyPending, setHistoryPending] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -43,6 +48,18 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
   useEffect(() => {
     if (sheetOpen) feedbackRef.current?.focus();
   }, [sheetOpen]);
+
+  useEffect(() => {
+    if (!sheetOpen && !approveOpen && !zoomOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || pending) return;
+      setSheetOpen(false);
+      setApproveOpen(false);
+      setZoomOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [approveOpen, pending, sheetOpen, zoomOpen]);
 
   const canDecide = review.canDecide && state === "pending";
 
@@ -71,6 +88,7 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
       setState(payload.state);
       setFeedback(payload.feedback ?? "");
       setSheetOpen(false);
+      setApproveOpen(false);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -83,7 +101,6 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
   }
 
   function approve() {
-    if (!window.confirm("Approve this image for Maya to use?")) return;
     void submitDecision({ decision: "approved" });
   }
 
@@ -136,10 +153,15 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <div>
-          <div className={styles.brand}>Maya Home Goods</div>
-          <div className={styles.version}>
-            Version {review.candidate.attemptNumber}
+        <div className={styles.headerIdentity}>
+          <Link href="/reviews" className={styles.backLink}>
+            Back to inbox
+          </Link>
+          <div>
+            <div className={styles.brand}>Maya Home Goods</div>
+            <div className={styles.version}>
+              Version {review.candidate.attemptNumber}
+            </div>
           </div>
         </div>
         <span className={`${styles.status} ${styles[`status_${state}`]}`}>
@@ -148,29 +170,59 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
       </header>
 
       <section className={styles.hero} aria-labelledby="review-title">
-        <button
-          className={styles.imageButton}
-          type="button"
-          onClick={() => setZoomOpen(true)}
-          aria-label={`Enlarge ${review.candidate.imageAlt}`}
-        >
-          <Image
-            className={styles.heroImage}
-            src={review.candidate.imageUrl}
-            alt={review.candidate.imageAlt}
-            width={1200}
-            height={1200}
-            priority
-            unoptimized
-          />
-          <span className={styles.zoomHint}>Tap to inspect</span>
-        </button>
         <div className={styles.identity}>
           <p className={styles.eyebrow}>{review.product.sku}</p>
           <h1 id="review-title">{review.product.name}</h1>
-          <a className={styles.originalLink} href="#original">
-            View original
-          </a>
+        </div>
+        <div className={styles.compareTabs} aria-label="Image view">
+          {(["candidate", "source", "compare"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={compareMode === mode}
+              onClick={() => setCompareMode(mode)}
+            >
+              {mode === "source"
+                ? "Original"
+                : mode[0].toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div
+          className={`${styles.reviewImages} ${styles[`view_${compareMode}`]}`}
+        >
+          {compareMode !== "source" ? (
+            <button
+              className={styles.imageButton}
+              type="button"
+              onClick={() => setZoomOpen(true)}
+              aria-label={`Enlarge ${review.candidate.imageAlt}`}
+            >
+              <Image
+                className={styles.heroImage}
+                src={review.candidate.imageUrl}
+                alt={review.candidate.imageAlt}
+                width={1200}
+                height={1200}
+                priority
+                unoptimized
+              />
+              <span className={styles.imageLabel}>Candidate</span>
+              <span className={styles.zoomHint}>Inspect</span>
+            </button>
+          ) : null}
+          {compareMode !== "candidate" ? (
+            <figure className={styles.sourceImage}>
+              <Image
+                src={review.source.imageUrl}
+                alt={review.source.imageAlt}
+                width={1200}
+                height={1200}
+                unoptimized
+              />
+              <figcaption>Original</figcaption>
+            </figure>
+          ) : null}
         </div>
       </section>
 
@@ -203,17 +255,6 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
           <p>{review.candidate.sceneDirection}</p>
         </div>
 
-        <figure id="original" className={styles.original}>
-          <Image
-            src={review.source.imageUrl}
-            alt={review.source.imageAlt}
-            width={900}
-            height={900}
-            unoptimized
-          />
-          <figcaption>Original product photo</figcaption>
-        </figure>
-
         {!canDecide ? (
           <section className={styles.completed} aria-live="polite">
             <h2>{statusLabels[state]}</h2>
@@ -228,6 +269,9 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
                 Recorded {formatDate(review.decidedAt)}
               </p>
             ) : null}
+            <Link className={styles.primaryButton} href="/reviews">
+              Back to review inbox
+            </Link>
           </section>
         ) : null}
 
@@ -302,7 +346,7 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
             <button
               className={styles.primaryButton}
               type="button"
-              onClick={approve}
+              onClick={() => setApproveOpen(true)}
               disabled={pending}
             >
               {pending ? "Saving…" : "Approve"}
@@ -375,8 +419,47 @@ export function ReviewExperience({ review }: { review: ReviewReadModel }) {
         </div>
       ) : null}
 
+      {approveOpen ? (
+        <div className={styles.scrim} onMouseDown={() => setApproveOpen(false)}>
+          <section
+            className={styles.confirmDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="approve-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <p className={styles.eyebrow}>Final decision</p>
+            <h2 id="approve-title">Approve this candidate?</h2>
+            <p>Maya will see it as approved and ready to use.</p>
+            <div className={styles.sheetActions}>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={() => setApproveOpen(false)}
+                disabled={pending}
+              >
+                Keep reviewing
+              </button>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={approve}
+                disabled={pending}
+              >
+                {pending ? "Saving…" : "Confirm approval"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {zoomOpen ? (
-        <div className={styles.zoom} role="dialog" aria-modal="true">
+        <div
+          className={styles.zoom}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Candidate image inspection"
+        >
           <button type="button" onClick={() => setZoomOpen(false)}>
             Close
           </button>

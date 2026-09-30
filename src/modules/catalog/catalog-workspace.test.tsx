@@ -83,7 +83,8 @@ describe("CatalogWorkspace", () => {
     ).toBe("/api/assets/asset_123/content");
   });
 
-  it("requires quote review before explicitly confirming generation", async () => {
+  it("requires quote review and uses a fresh key for another candidate", async () => {
+    let generationNumber = 0;
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -132,21 +133,22 @@ describe("CatalogWorkspace", () => {
           );
         }
         if (url.endsWith("/generation-attempts") && init?.method === "POST") {
+          generationNumber += 1;
           return new Response(
             JSON.stringify({
               attempt: {
-                id: "attempt_123",
-                attemptNumber: 1,
+                id: `attempt_${generationNumber}`,
+                attemptNumber: generationNumber,
                 sceneBriefId: "scene_123",
                 sceneBriefVersion: 1,
                 promptText: "Morning kitchen counter",
-                outputAssetId: null,
+                outputAssetId: `asset_candidate_${generationNumber}`,
                 createdAt: "2026-09-29T00:15:00.000Z",
-                status: "queued",
+                status: "succeeded",
                 customerState: {
-                  label: "Waiting",
-                  terminal: false,
-                  nextAction: null
+                  label: "Ready to review",
+                  terminal: true,
+                  nextAction: "Review the generated image."
                 },
                 failure: null
               }
@@ -211,14 +213,40 @@ describe("CatalogWorkspace", () => {
     ).toHaveLength(0);
 
     fireEvent.click(confirmButton);
-    await waitFor(() => expect(screen.getByText("Waiting")).toBeTruthy());
+    await screen.findByText("1 candidate available");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate another candidate" })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Confirm 0.0434 USD generation"
+      })
+    );
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([input, init]) =>
+            String(input).endsWith("/generation-attempts") &&
+            init?.method === "POST"
+        )
+      ).toHaveLength(2)
+    );
+    const generationCalls = fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input).endsWith("/generation-attempts") &&
+        init?.method === "POST"
+    );
+    expect(generationCalls).toHaveLength(2);
     expect(
-      fetchMock.mock.calls.filter(
-        ([input, init]) =>
-          String(input).endsWith("/generation-attempts") &&
-          init?.method === "POST"
-      )
-    ).toHaveLength(1);
+      (generationCalls[0][1]?.headers as Record<string, string>)[
+        "Idempotency-Key"
+      ]
+    ).not.toBe(
+      (generationCalls[1][1]?.headers as Record<string, string>)[
+        "Idempotency-Key"
+      ]
+    );
   });
 
   it("exposes catalog export and approved image downloads to Maya", async () => {
@@ -387,7 +415,9 @@ describe("CatalogWorkspace", () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Send to Ellie" })
+      await screen.findByRole("button", {
+        name: "Send to Ellie for review"
+      })
     );
 
     expect(await screen.findByText("Waiting for Ellie")).toBeTruthy();
@@ -455,7 +485,7 @@ describe("CatalogWorkspace", () => {
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "Cool daylight with a quiet stone background" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save scene" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save revision" }));
 
     await waitFor(() =>
       expect(sceneRequest).toEqual({
@@ -463,10 +493,67 @@ describe("CatalogWorkspace", () => {
         basedOnReviewId: "review_1"
       })
     );
-    expect(await screen.findByText("Previous generated images")).toBeTruthy();
-    expect(screen.getByText("Scene version 1 · Previous scene")).toBeTruthy();
+    expect(
+      await screen.findByRole("img", {
+        name: "Stoneware Mug generated candidate 1"
+      })
+    ).toBeTruthy();
+    expect(screen.getByText(/Scene version 1.*Previous scene/)).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Review generation quote" })
+    ).toBeTruthy();
+  });
+
+  it("lets Maya navigate, compare, and act on any generated candidate", async () => {
+    const older = successfulAttempt({
+      id: "attempt_1",
+      attemptNumber: 1,
+      outputAssetId: "asset_candidate_1"
+    });
+    const newer = successfulAttempt({
+      id: "attempt_2",
+      attemptNumber: 2,
+      outputAssetId: "asset_candidate_2",
+      createdAt: "2026-09-29T00:25:00.000Z"
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/generation-attempts")) {
+          return jsonResponse({ attempts: [older, newer] });
+        }
+        if (url === `/api/products/${productSummary.id}`) {
+          return jsonResponse(productDetail());
+        }
+        return jsonResponse(emptyProductList());
+      })
+    );
+
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+
+    expect(
+      await screen.findByRole("img", {
+        name: "Stoneware Mug generated candidate 2"
+      })
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show previous candidate" })
+    );
+    expect(
+      screen.getByRole("img", {
+        name: "Stoneware Mug generated candidate 1"
+      })
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Compare with source" })
+    );
+    expect(
+      screen.getAllByRole("img", { name: "Stoneware Mug source product" })
+    ).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: "Send to Ellie for review" })
     ).toBeTruthy();
   });
 });

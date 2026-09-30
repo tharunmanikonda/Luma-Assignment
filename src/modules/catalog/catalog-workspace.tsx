@@ -164,10 +164,7 @@ function money(minor: number | null, currency: string) {
 function StatusBadge({ product }: { product: ProductSummary }) {
   return (
     <span className={`${styles.status} ${styles[product.status]}`}>
-      <span aria-hidden="true">
-        {product.status === "ready_to_generate" ? "Ready" : "Setup"}
-      </span>
-      <span className={styles.srOnly}>{product.statusLabel}</span>
+      <span>{product.statusLabel}</span>
     </span>
   );
 }
@@ -449,6 +446,10 @@ function ProductPanel({
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const [revisionReviewId, setRevisionReviewId] = useState<string | null>(null);
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(
+    null
+  );
+  const [compareWithSource, setCompareWithSource] = useState(false);
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const generationKey = useRef(crypto.randomUUID());
   const reviewKeys = useRef(new Map<string, string>());
@@ -499,6 +500,8 @@ function ProductPanel({
     setGenerationMessage(null);
     setReviewMessage(null);
     setRevisionReviewId(null);
+    setSelectedAttemptId(null);
+    setCompareWithSource(false);
     setBrokenImages(new Set());
     generationKey.current = crypto.randomUUID();
   }, [productId]);
@@ -520,6 +523,29 @@ function ProductPanel({
         ) ?? null,
     [currentSceneAttempts]
   );
+  const successfulCandidates = useMemo(
+    () =>
+      attempts.filter(
+        (candidate) =>
+          candidate.status === "succeeded" && candidate.outputAssetId
+      ),
+    [attempts]
+  );
+  const selectedCandidate = useMemo(
+    () =>
+      successfulCandidates.find(
+        (candidate) => candidate.id === selectedAttemptId
+      ) ??
+      currentCandidate ??
+      successfulCandidates[0] ??
+      null,
+    [currentCandidate, selectedAttemptId, successfulCandidates]
+  );
+  const selectedCandidateIndex = selectedCandidate
+    ? successfulCandidates.findIndex(
+        (candidate) => candidate.id === selectedCandidate.id
+      )
+    : -1;
   const activeAttempt = useMemo(
     () =>
       [...currentSceneAttempts]
@@ -528,18 +554,6 @@ function ProductPanel({
     [currentSceneAttempts]
   );
   const latestCurrentAttempt = currentSceneAttempts.at(-1) ?? null;
-  const previousCandidates = useMemo(
-    () =>
-      attempts
-        .filter(
-          (candidate) =>
-            candidate.status === "succeeded" &&
-            candidate.outputAssetId &&
-            candidate.id !== currentCandidate?.id
-        )
-        .reverse(),
-    [attempts, currentCandidate?.id]
-  );
   const actionableReview = useMemo(
     () =>
       [...currentSceneAttempts]
@@ -548,6 +562,7 @@ function ProductPanel({
         .find((review) => review?.state === "changes_requested") ?? null,
     [currentSceneAttempts]
   );
+  const sceneIsDirty = scene !== (product?.sceneText ?? "");
 
   useEffect(() => {
     const shouldPoll =
@@ -668,6 +683,7 @@ function ProductPanel({
         ...current.filter((candidate) => candidate.id !== result.attempt.id),
         { ...result.attempt, review: result.attempt.review ?? null }
       ]);
+      generationKey.current = crypto.randomUUID();
       setQuote(null);
       setGenerationMessage(
         "Generation confirmed. The worker is preparing your image."
@@ -809,6 +825,15 @@ function ProductPanel({
             </dl>
           </section>
           <section className={styles.sceneEditor}>
+            {revisionReviewId ? (
+              <div className={styles.revisionBanner} role="status">
+                <strong>Revising from Ellie&apos;s feedback</strong>
+                <span>
+                  Update the direction below. The saved revision will retain the
+                  link to the reviewed candidate.
+                </span>
+              </div>
+            ) : null}
             <div>
               <p className={styles.eyebrow}>Scene direction</p>
               <h3>Describe the finished product photo</h3>
@@ -820,6 +845,12 @@ function ProductPanel({
               rows={6}
               placeholder="For example: morning kitchen counter, steam, warm light"
             />
+            {sceneIsDirty && product.sceneVersion ? (
+              <p className={styles.dirtyNotice}>
+                Unsaved changes. Existing images were generated from version{" "}
+                {product.sceneVersion}.
+              </p>
+            ) : null}
             <div className={styles.sceneFooter}>
               <span>
                 {product.sceneVersion
@@ -831,7 +862,11 @@ function ProductPanel({
                 onClick={save}
                 disabled={busy || scene.trim().length < 8}
               >
-                {busy ? "Saving..." : "Save scene"}
+                {busy
+                  ? "Saving..."
+                  : revisionReviewId
+                    ? "Save revision"
+                    : "Save scene"}
               </button>
             </div>
             {message ? (
@@ -850,7 +885,7 @@ function ProductPanel({
           <section className={styles.generationPanel}>
             <div>
               <p className={styles.eyebrow}>Image generation</p>
-              <h3>Create one candidate</h3>
+              <h3>Generate candidates</h3>
             </div>
             {workflowLoading ? (
               <p className={styles.notice}>Loading generation history...</p>
@@ -866,10 +901,6 @@ function ProductPanel({
                     "You can close this panel. Progress will resume here when you return."}
                 </p>
               </div>
-            ) : currentCandidate ? (
-              <p className={styles.success}>
-                Candidate {currentCandidate.attemptNumber} is ready below.
-              </p>
             ) : quote ? (
               <div className={styles.quoteConfirmation}>
                 <div>
@@ -904,6 +935,29 @@ function ProductPanel({
                     Cancel
                   </button>
                 </div>
+              </div>
+            ) : currentCandidate ? (
+              <div className={styles.generationStatus}>
+                <strong>
+                  {successfulCandidates.length} candidate
+                  {successfulCandidates.length === 1 ? "" : "s"} available
+                </strong>
+                <p>
+                  Review the selected image below or deliberately create another
+                  candidate from scene version {product.sceneVersion}.
+                </p>
+                <button
+                  className={styles.secondaryButton}
+                  onClick={reviewQuote}
+                  disabled={generationBusy || sceneIsDirty}
+                >
+                  {generationBusy
+                    ? "Loading quote..."
+                    : "Generate another candidate"}
+                </button>
+                {sceneIsDirty ? (
+                  <p>Save the scene changes before requesting a new quote.</p>
+                ) : null}
               </div>
             ) : latestCurrentAttempt?.status === "failed" ? (
               <div className={styles.generationStatus}>
@@ -943,65 +997,140 @@ function ProductPanel({
               </p>
             ) : null}
           </section>
-          {currentCandidate?.outputAssetId ? (
+          {selectedCandidate?.outputAssetId ? (
             <section className={styles.candidateSection}>
-              <div>
-                <p className={styles.eyebrow}>Current candidate</p>
-                <h3>Candidate {currentCandidate.attemptNumber}</h3>
-                <p className={styles.help}>
-                  Scene version {currentCandidate.sceneBriefVersion}
-                </p>
+              <div className={styles.candidateHeading}>
+                <div>
+                  <p className={styles.eyebrow}>Generated images</p>
+                  <h3>Candidate {selectedCandidate.attemptNumber}</h3>
+                  <p className={styles.help}>
+                    Scene version {selectedCandidate.sceneBriefVersion}
+                    {selectedCandidate.sceneBriefId !== product.sceneBriefId
+                      ? " · Previous scene"
+                      : " · Current scene"}
+                  </p>
+                </div>
+                <div className={styles.candidateNavigation}>
+                  <button
+                    className={styles.secondaryButton}
+                    type="button"
+                    aria-label="Show previous candidate"
+                    disabled={selectedCandidateIndex <= 0}
+                    onClick={() =>
+                      setSelectedAttemptId(
+                        successfulCandidates[selectedCandidateIndex - 1]?.id ??
+                          null
+                      )
+                    }
+                  >
+                    Previous
+                  </button>
+                  <span aria-live="polite">
+                    {selectedCandidateIndex + 1} of{" "}
+                    {successfulCandidates.length}
+                  </span>
+                  <button
+                    className={styles.secondaryButton}
+                    type="button"
+                    aria-label="Show next candidate"
+                    disabled={
+                      selectedCandidateIndex < 0 ||
+                      selectedCandidateIndex >= successfulCandidates.length - 1
+                    }
+                    onClick={() =>
+                      setSelectedAttemptId(
+                        successfulCandidates[selectedCandidateIndex + 1]?.id ??
+                          null
+                      )
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
-              {brokenImages.has(currentCandidate.outputAssetId) ? (
-                <p className={styles.error}>
-                  The generated image could not be loaded. Refresh the panel or
-                  check the stored asset.
-                </p>
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  className={styles.candidateImage}
-                  src={`/api/assets/${encodeURIComponent(currentCandidate.outputAssetId)}/content`}
-                  alt={`${product.name} generated candidate ${currentCandidate.attemptNumber}`}
-                  onError={() =>
-                    markImageBroken(currentCandidate.outputAssetId!)
-                  }
-                />
-              )}
-              {currentCandidate.review ? (
+              <div className={styles.compareControl}>
+                <button
+                  type="button"
+                  className={!compareWithSource ? styles.activeCompare : ""}
+                  onClick={() => setCompareWithSource(false)}
+                >
+                  Candidate only
+                </button>
+                <button
+                  type="button"
+                  className={compareWithSource ? styles.activeCompare : ""}
+                  onClick={() => setCompareWithSource(true)}
+                >
+                  Compare with source
+                </button>
+              </div>
+              <div className={compareWithSource ? styles.compareStage : ""}>
+                {compareWithSource && product.sourceUrl ? (
+                  <figure>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={product.sourceUrl}
+                      alt={`${product.name} source product`}
+                    />
+                    <figcaption>Source</figcaption>
+                  </figure>
+                ) : null}
+                <figure>
+                  {brokenImages.has(selectedCandidate.outputAssetId) ? (
+                    <p className={styles.error}>
+                      The generated image could not be loaded. Refresh the panel
+                      or check the stored asset.
+                    </p>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      className={styles.candidateImage}
+                      src={`/api/assets/${encodeURIComponent(selectedCandidate.outputAssetId)}/content`}
+                      alt={`${product.name} generated candidate ${selectedCandidate.attemptNumber}`}
+                      onError={() =>
+                        markImageBroken(selectedCandidate.outputAssetId!)
+                      }
+                    />
+                  )}
+                  <figcaption>
+                    Candidate {selectedCandidate.attemptNumber}
+                  </figcaption>
+                </figure>
+              </div>
+              {selectedCandidate.review ? (
                 <>
                   <MayaReviewStatus
-                    state={currentCandidate.review.state}
-                    feedback={currentCandidate.review.feedback}
-                    reviewUrl={currentCandidate.review.reviewUrl}
-                    createdAt={currentCandidate.review.createdAt}
+                    state={selectedCandidate.review.state}
+                    feedback={selectedCandidate.review.feedback}
+                    reviewUrl={selectedCandidate.review.reviewUrl}
+                    createdAt={selectedCandidate.review.createdAt}
                   />
                   <div className={styles.actions}>
                     <button
                       className={styles.secondaryButton}
                       onClick={() =>
-                        void copyReviewLink(currentCandidate.review!.reviewUrl)
+                        void copyReviewLink(selectedCandidate.review!.reviewUrl)
                       }
                       disabled={reviewBusy}
                     >
                       Copy review link
                     </button>
-                    {currentCandidate.review.state === "pending" ? (
+                    {selectedCandidate.review.state === "pending" ? (
                       <button
                         className={styles.secondaryButton}
                         onClick={() =>
-                          void revokeReview(currentCandidate.review!)
+                          void revokeReview(selectedCandidate.review!)
                         }
                         disabled={reviewBusy}
                       >
                         {reviewBusy ? "Updating..." : "Revoke review"}
                       </button>
                     ) : null}
-                    {currentCandidate.review.state === "changes_requested" ? (
+                    {selectedCandidate.review.state === "changes_requested" ? (
                       <button
                         className={styles.primaryButton}
                         onClick={() => {
-                          setRevisionReviewId(currentCandidate.review!.id);
+                          setRevisionReviewId(selectedCandidate.review!.id);
                           sceneInput.current?.focus();
                           sceneInput.current?.scrollIntoView?.({
                             behavior: "smooth",
@@ -1017,17 +1146,12 @@ function ProductPanel({
               ) : (
                 <button
                   className={styles.primaryButton}
-                  onClick={() => void sendToEllie(currentCandidate)}
+                  onClick={() => void sendToEllie(selectedCandidate)}
                   disabled={reviewBusy}
                 >
-                  {reviewBusy ? "Sending..." : "Send to Ellie"}
+                  {reviewBusy ? "Sending..." : "Send to Ellie for review"}
                 </button>
               )}
-              {revisionReviewId === currentCandidate.review?.id ? (
-                <p className={styles.notice}>
-                  Your next saved scene will be linked to Ellie&apos;s feedback.
-                </p>
-              ) : null}
               {reviewMessage ? (
                 <p
                   className={
@@ -1041,15 +1165,21 @@ function ProductPanel({
               ) : null}
             </section>
           ) : null}
-          {previousCandidates.length ? (
+          {successfulCandidates.length > 1 ? (
             <section className={styles.candidateHistory}>
               <div>
                 <p className={styles.eyebrow}>Candidate history</p>
-                <h3>Previous generated images</h3>
+                <h3>Choose a candidate</h3>
               </div>
               <div className={styles.historyGrid}>
-                {previousCandidates.map((candidate) => (
-                  <article key={candidate.id}>
+                {successfulCandidates.map((candidate) => (
+                  <button
+                    type="button"
+                    className={`${styles.candidateCard} ${candidate.id === selectedCandidate?.id ? styles.selectedCandidate : ""}`}
+                    key={candidate.id}
+                    onClick={() => setSelectedAttemptId(candidate.id)}
+                    aria-pressed={candidate.id === selectedCandidate?.id}
+                  >
                     {candidate.outputAssetId &&
                     !brokenImages.has(candidate.outputAssetId) ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1079,7 +1209,7 @@ function ProductPanel({
                           : "Not sent for review"}
                       </span>
                     </div>
-                  </article>
+                  </button>
                 ))}
               </div>
             </section>
@@ -1157,6 +1287,43 @@ function Panel({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    panel?.querySelector<HTMLElement>("button, a, input, textarea")?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !panel) return;
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
   return (
     <div
       className={styles.scrim}
@@ -1166,6 +1333,7 @@ function Panel({
       }}
     >
       <aside
+        ref={panelRef}
         className={styles.panel}
         role="dialog"
         aria-modal="true"

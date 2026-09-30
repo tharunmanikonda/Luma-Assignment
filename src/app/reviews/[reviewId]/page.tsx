@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { roleHomePath } from "@/infrastructure/auth/role-home";
 import { getSessionActor } from "@/infrastructure/auth/session";
 import { ReviewExperience } from "@/modules/reviews/components/review-experience";
 import { ReviewUnavailable } from "@/modules/reviews/components/review-unavailable";
@@ -15,7 +16,7 @@ export default async function ReviewPage({
   if (!actor) {
     redirect(`/sign-in?next=/reviews/${encodeURIComponent(reviewId)}`);
   }
-  if (actor.role !== "approver") redirect("/access-denied");
+  if (actor.role !== "approver") redirect(roleHomePath(actor.role));
 
   try {
     const review = await getReviewService().readAssignedReview({

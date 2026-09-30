@@ -12,6 +12,7 @@ import {
 import { getDb } from "@/db/client";
 import { activityEvents, assets } from "@/db/schema";
 import { reviewRequests } from "@/modules/reviews/schema";
+import { generationAttempts } from "@/modules/generation/schema";
 import { AppError } from "@/shared/errors";
 import { products, sceneBriefs } from "./schema";
 import {
@@ -78,11 +79,33 @@ function summaryFromRow(row: {
   sourceAssetId: string | null;
   sourceStatus: "pending" | "ready" | "failed" | null;
   sceneText: string | null;
+  attempts: number;
+  activeAttempts: number;
+  latestReviewState:
+    "pending" | "approved" | "changes_requested" | "revoked" | null;
 }) {
   const status = deriveCatalogStatus({
     sourceStatus: row.sourceStatus,
     sceneText: row.sceneText
   });
+  const workflow =
+    row.activeAttempts > 0
+      ? { label: "Generating", nextAction: "View progress" }
+      : row.latestReviewState === "pending"
+        ? { label: "Waiting on Ellie", nextAction: "Open review" }
+        : row.latestReviewState === "changes_requested"
+          ? { label: "Changes requested", nextAction: "Revise from feedback" }
+          : row.latestReviewState === "approved"
+            ? { label: "Approved", nextAction: "Download approved" }
+            : row.attempts > 0
+              ? { label: "Generated", nextAction: "Review candidates" }
+              : {
+                  label: statusLabels[status],
+                  nextAction:
+                    status === "ready_to_generate"
+                      ? "Generate candidate"
+                      : "Finish setup"
+                };
   return {
     id: row.id,
     sku: row.sku,
@@ -93,10 +116,9 @@ function summaryFromRow(row: {
     sourceUrl: durableSourceUrl(row.sourceAssetId, row.sourceStatus),
     sceneSummary: row.sceneText,
     status,
-    statusLabel: statusLabels[status],
-    attempts: 0,
-    nextAction:
-      status === "ready_to_generate" ? "Review product" : "Finish setup"
+    statusLabel: workflow.label,
+    attempts: row.attempts,
+    nextAction: workflow.nextAction
   };
 }
 
@@ -166,7 +188,24 @@ export async function listProducts(input: {
           cursorTimestamp: sql<string>`${products.updatedAt}::text`,
           sourceAssetId: assets.id,
           sourceStatus: assets.status,
-          sceneText: sceneBriefs.text
+          sceneText: sceneBriefs.text,
+          attempts: sql<number>`(
+            select count(*)::int from ${generationAttempts}
+            where ${generationAttempts.productId} = ${products.id}
+          )`,
+          activeAttempts: sql<number>`(
+            select count(*)::int from ${generationAttempts}
+            where ${generationAttempts.productId} = ${products.id}
+              and ${generationAttempts.status} in ('pending', 'submitting', 'queued', 'processing', 'storing')
+          )`,
+          latestReviewState: sql<
+            "pending" | "approved" | "changes_requested" | "revoked" | null
+          >`(
+            select ${reviewRequests.state} from ${reviewRequests}
+            where ${reviewRequests.productId} = ${products.id}
+            order by ${reviewRequests.createdAt} desc, ${reviewRequests.id} desc
+            limit 1
+          )`
         })
         .from(products)
         .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))

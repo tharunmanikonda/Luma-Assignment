@@ -345,7 +345,9 @@ describe.runIf(runDatabaseTests)(
         workspaceId: maya.workspaceId,
         assetId: secondAttempt.outputAssetId!
       });
-      expect(new TextDecoder().decode(approved.bytes)).toBe("fake-image-bytes");
+      expect(Array.from(approved.bytes.slice(0, 8))).toEqual([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+      ]);
       expect(approved).toMatchObject({
         contentType: "image/png",
         filename: "hg-qa-001-approved-v2.png"

@@ -705,6 +705,71 @@
   gap: 16px;
 }
 
+.candidateHeading,
+.candidateNavigation {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.candidateNavigation span {
+  color: #68736f;
+  font-size: 12px;
+  min-width: 42px;
+  text-align: center;
+}
+
+.compareControl {
+  background: #e7ebe7;
+  display: inline-flex;
+  justify-self: start;
+  padding: 3px;
+}
+
+.compareControl button {
+  background: transparent;
+  border: 0;
+  color: #52615c;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.compareControl .activeCompare {
+  background: #fff;
+  color: #17211f;
+  box-shadow: 0 1px 3px rgb(24 38 33 / 14%);
+}
+
+.compareStage {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.candidateSection figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.compareStage figure img {
+  aspect-ratio: 4 / 3;
+  background: #eef1ed;
+  display: block;
+  object-fit: contain;
+  width: 100%;
+}
+
+.candidateSection figcaption {
+  color: #68736f;
+  font-size: 12px;
+  margin-top: 7px;
+}
+
 .candidateImage {
   aspect-ratio: 4 / 3;
   background: #eef1ed;
@@ -725,9 +790,22 @@
   margin-top: 16px;
 }
 
-.historyGrid article {
+.historyGrid article,
+.candidateCard {
+  background: transparent;
   border: 1px solid #d8dfda;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
   min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.candidateCard:hover,
+.selectedCandidate {
+  border-color: #226351;
+  box-shadow: 0 0 0 1px #226351;
 }
 
 .historyGrid img,
@@ -747,7 +825,8 @@
   justify-content: center;
 }
 
-.historyGrid article > div:last-child {
+.historyGrid article > div:last-child,
+.candidateCard > div:last-child {
   display: grid;
   gap: 5px;
   padding: 12px;
@@ -758,6 +837,26 @@
   font-size: 12px;
   overflow-wrap: anywhere;
   text-transform: capitalize;
+}
+
+.revisionBanner {
+  background: #edf5f1;
+  border-left: 3px solid #226351;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+}
+
+.revisionBanner span,
+.dirtyNotice {
+  color: #52615c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dirtyNotice {
+  margin: 0 0 10px;
 }
 
 .approvedGrid article {
@@ -932,6 +1031,11 @@
   .productHero {
     grid-template-columns: 1fr;
   }
+
+  .candidateHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 520px) {
@@ -987,6 +1091,10 @@
   }
 
   .historyGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .compareStage {
     grid-template-columns: 1fr;
   }
 }

@@ -1,5 +1,7 @@
+"use client";
+
 import Link from "next/link";
-import React from "react";
+import React, { useState } from "react";
 import styles from "./review-inbox.module.css";
 
 export type ReviewInboxItem = {
@@ -23,9 +25,15 @@ export function ReviewInbox({
   reviews: ReviewInboxItem[];
   accountControl: React.ReactNode;
 }) {
+  const [view, setView] = useState<"pending" | "decided" | "all">("pending");
   const pendingCount = reviews.filter(
     (review) => review.state === "pending"
   ).length;
+  const visibleReviews = reviews.filter((review) => {
+    if (view === "pending") return review.state === "pending";
+    if (view === "decided") return review.state !== "pending";
+    return true;
+  });
 
   return (
     <div className={styles.page}>
@@ -44,9 +52,32 @@ export function ReviewInbox({
           </div>
           <span>{pendingCount} waiting for a decision</span>
         </div>
-        {reviews.length ? (
+        <div className={styles.tabs} aria-label="Review inbox filters">
+          <button
+            type="button"
+            aria-pressed={view === "pending"}
+            onClick={() => setView("pending")}
+          >
+            Pending <span>{pendingCount}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "decided"}
+            onClick={() => setView("decided")}
+          >
+            Decided <span>{reviews.length - pendingCount}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "all"}
+            onClick={() => setView("all")}
+          >
+            All <span>{reviews.length}</span>
+          </button>
+        </div>
+        {visibleReviews.length ? (
           <div className={styles.grid}>
-            {reviews.map((review) => (
+            {visibleReviews.map((review) => (
               <article className={styles.card} key={review.id}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -66,6 +97,12 @@ export function ReviewInbox({
                     {review.sku} · Candidate {review.attemptNumber} · Scene{" "}
                     {review.sceneVersion}
                   </p>
+                  <p className={styles.meta}>
+                    Sent{" "}
+                    {new Intl.DateTimeFormat(undefined, {
+                      dateStyle: "medium"
+                    }).format(new Date(review.createdAt))}
+                  </p>
                   <p className={styles.scene}>{review.sceneDirection}</p>
                   <Link
                     className={styles.openLink}
@@ -81,8 +118,16 @@ export function ReviewInbox({
           </div>
         ) : (
           <section className={styles.empty}>
-            <h2>No reviews assigned yet</h2>
-            <p>When Maya sends a generated candidate, it will appear here.</p>
+            <h2>
+              {view === "pending"
+                ? "You are all caught up"
+                : "No reviews in this view"}
+            </h2>
+            <p>
+              {reviews.length
+                ? "Choose another filter to see the rest of your review history."
+                : "When Maya sends a generated candidate, it will appear here."}
+            </p>
           </section>
         )}
       </main>
