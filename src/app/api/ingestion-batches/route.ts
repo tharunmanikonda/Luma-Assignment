@@ -1,8 +1,24 @@
 import { NextResponse } from "next/server";
 import { requireOperator } from "@/infrastructure/auth/session";
 import { apiRoute } from "@/modules/catalog/api-response";
-import { createIngestionBatch } from "@/modules/ingestion/ingestion-service";
+import {
+  createIngestionBatch,
+  listIngestionHistory
+} from "@/modules/ingestion/ingestion-service";
 import { AppError } from "@/shared/errors";
+
+export const GET = apiRoute(async (request) => {
+  const actor = await requireOperator();
+  const params = new URL(request.url).searchParams;
+  const offsetValue = params.get("offset");
+  const offset = offsetValue ? Number(offsetValue) : 0;
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new AppError("BAD_REQUEST", "Import history offset is invalid.", 400);
+  }
+  return NextResponse.json(
+    await listIngestionHistory({ actor, offset, limit: 5 })
+  );
+});
 
 export const POST = apiRoute(async (request) => {
   const actor = await requireOperator();

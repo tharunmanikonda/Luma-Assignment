@@ -32,7 +32,14 @@ export function MayaReviewStatus({
       {state === "changes_requested" && feedback ? (
         <blockquote>“{feedback}”</blockquote>
       ) : null}
-      <a href={reviewUrl}>Open review link</a>
+      {state === "revoked" ? (
+        <p className={styles.subtle}>
+          Ellie can no longer access this review. The generated image remains
+          available here for Maya&apos;s audit trail.
+        </p>
+      ) : (
+        <a href={reviewUrl}>Open review link</a>
+      )}
     </section>
   );
 }

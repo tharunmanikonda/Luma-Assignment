@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { activityEvents, assets } from "@/db/schema";
+import { users } from "@/db/schema/auth";
 import { reviewRequests } from "@/modules/reviews/schema";
 import { generationAttempts } from "@/modules/generation/schema";
 import { AppError } from "@/shared/errors";
@@ -33,6 +34,51 @@ type ProductCursor = {
   timestamp: string;
   id: string;
 };
+
+const overviewPageSize = 4;
+
+function overviewWindow(input: { offset?: number; limit?: number }) {
+  const offset = Math.max(0, Math.trunc(input.offset ?? 0));
+  const limit = Math.min(
+    12,
+    Math.max(1, Math.trunc(input.limit ?? overviewPageSize))
+  );
+  return { offset, limit };
+}
+
+function latestReviewStateSql() {
+  return sql<"pending" | "approved" | "changes_requested" | "revoked" | null>`(
+    select ${reviewRequests.state} from ${reviewRequests}
+    where ${reviewRequests.productId} = ${products.id}
+    order by coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt}) desc,
+      ${reviewRequests.createdAt} desc,
+      ${reviewRequests.id} desc
+    limit 1
+  )`;
+}
+
+function latestReviewSceneVersionSql() {
+  return sql<number | null>`(
+    select ${reviewRequests.sceneVersion} from ${reviewRequests}
+    where ${reviewRequests.productId} = ${products.id}
+    order by coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt}) desc,
+      ${reviewRequests.createdAt} desc,
+      ${reviewRequests.id} desc
+    limit 1
+  )`;
+}
+
+function latestReviewEventAtSql() {
+  return sql<Date | null>`(
+    select coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt})
+    from ${reviewRequests}
+    where ${reviewRequests.productId} = ${products.id}
+    order by coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt}) desc,
+      ${reviewRequests.createdAt} desc,
+      ${reviewRequests.id} desc
+    limit 1
+  )`;
+}
 
 export function encodeProductCursor(input: { timestamp: string; id: string }) {
   return Buffer.from(JSON.stringify({ v: 1, ...input }), "utf8").toString(
@@ -79,33 +125,41 @@ function summaryFromRow(row: {
   sourceAssetId: string | null;
   sourceStatus: "pending" | "ready" | "failed" | null;
   sceneText: string | null;
+  sceneVersion?: number | null;
   attempts: number;
   activeAttempts: number;
   latestReviewState:
     "pending" | "approved" | "changes_requested" | "revoked" | null;
+  latestReviewSceneVersion?: number | null;
 }) {
   const status = deriveCatalogStatus({
     sourceStatus: row.sourceStatus,
     sceneText: row.sceneText
   });
+  const reviewRequiresAction =
+    row.latestReviewState &&
+    ["changes_requested", "revoked"].includes(row.latestReviewState) &&
+    (row.sceneVersion ?? 0) <= (row.latestReviewSceneVersion ?? 0);
   const workflow =
-    row.activeAttempts > 0
-      ? { label: "Generating", nextAction: "View progress" }
-      : row.latestReviewState === "pending"
-        ? { label: "Waiting on Ellie", nextAction: "Open review" }
-        : row.latestReviewState === "changes_requested"
-          ? { label: "Changes requested", nextAction: "Revise from feedback" }
-          : row.latestReviewState === "approved"
-            ? { label: "Approved", nextAction: "Download approved" }
-            : row.attempts > 0
-              ? { label: "Generated", nextAction: "Review images" }
-              : {
-                  label: statusLabels[status],
-                  nextAction:
-                    status === "ready_to_generate"
-                      ? "Generate image"
-                      : "Finish setup"
-                };
+    reviewRequiresAction && row.latestReviewState === "revoked"
+      ? { label: "Review revoked", nextAction: "Edit scene direction" }
+      : reviewRequiresAction && row.latestReviewState === "changes_requested"
+        ? { label: "Changes requested", nextAction: "Revise from feedback" }
+        : row.activeAttempts > 0
+          ? { label: "Generating", nextAction: "View progress" }
+          : row.latestReviewState === "pending"
+            ? { label: "Waiting on Ellie", nextAction: "Open review" }
+            : row.latestReviewState === "approved"
+              ? { label: "Approved", nextAction: "Download approved" }
+              : row.attempts > 0
+                ? { label: "Generated", nextAction: "Review images" }
+                : {
+                    label: statusLabels[status],
+                    nextAction:
+                      status === "ready_to_generate"
+                        ? "Generate image"
+                        : "Finish setup"
+                  };
   return {
     id: row.id,
     sku: row.sku,
@@ -189,6 +243,7 @@ export async function listProducts(input: {
           sourceAssetId: assets.id,
           sourceStatus: assets.status,
           sceneText: sceneBriefs.text,
+          sceneVersion: sceneBriefs.version,
           attempts: sql<number>`(
             select count(*)::int from ${generationAttempts}
             where ${generationAttempts.productId} = ${products.id}
@@ -198,14 +253,8 @@ export async function listProducts(input: {
             where ${generationAttempts.productId} = ${products.id}
               and ${generationAttempts.status} in ('pending', 'submitting', 'queued', 'processing', 'storing')
           )`,
-          latestReviewState: sql<
-            "pending" | "approved" | "changes_requested" | "revoked" | null
-          >`(
-            select ${reviewRequests.state} from ${reviewRequests}
-            where ${reviewRequests.productId} = ${products.id}
-            order by ${reviewRequests.createdAt} desc, ${reviewRequests.id} desc
-            limit 1
-          )`
+          latestReviewState: latestReviewStateSql(),
+          latestReviewSceneVersion: latestReviewSceneVersionSql()
         })
         .from(products)
         .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
@@ -238,6 +287,156 @@ export async function listProducts(input: {
             id: last.id
           })
         : null
+  };
+}
+
+const latestReviewActionableCondition = sql<boolean>`(
+  ${latestReviewStateSql()} in ('changes_requested', 'revoked')
+  and coalesce(${sceneBriefs.version}, 0) <= coalesce(${latestReviewSceneVersionSql()}, 0)
+)`;
+
+const priorityCondition = sql<boolean>`(
+  coalesce((${needsSetupCondition}), false)
+  or ${latestReviewActionableCondition}
+)`;
+
+const priorityRank = sql<number>`case
+  when ${assets.status} = 'failed' then 0
+  when ${latestReviewStateSql()} = 'changes_requested'
+    and coalesce(${sceneBriefs.version}, 0) <= coalesce(${latestReviewSceneVersionSql()}, 0) then 1
+  when ${latestReviewStateSql()} = 'revoked'
+    and coalesce(${sceneBriefs.version}, 0) <= coalesce(${latestReviewSceneVersionSql()}, 0) then 2
+  when ${assets.status} is null or ${assets.status} = 'pending' then 3
+  when nullif(btrim(${sceneBriefs.text}), '') is null then 4
+  else 5
+end`;
+
+export async function listPriorityQueue(input: {
+  actor: ActorContext;
+  offset?: number;
+  limit?: number;
+}) {
+  const db = getDb();
+  const { offset, limit } = overviewWindow(input);
+  const baseConditions = [
+    eq(products.workspaceId, input.actor.workspaceId),
+    priorityCondition
+  ];
+  const [rows, [total]] = await Promise.all([
+    db
+      .select({
+        id: products.id,
+        sku: products.sku,
+        name: products.name,
+        category: products.category,
+        updatedAt: products.updatedAt,
+        sourceAssetId: assets.id,
+        sourceStatus: assets.status,
+        sceneText: sceneBriefs.text,
+        sceneVersion: sceneBriefs.version,
+        attempts: sql<number>`(
+          select count(*)::int from ${generationAttempts}
+          where ${generationAttempts.productId} = ${products.id}
+        )`,
+        activeAttempts: sql<number>`(
+          select count(*)::int from ${generationAttempts}
+          where ${generationAttempts.productId} = ${products.id}
+            and ${generationAttempts.status} in ('pending', 'submitting', 'queued', 'processing', 'storing')
+        )`,
+        latestReviewState: latestReviewStateSql(),
+        latestReviewSceneVersion: latestReviewSceneVersionSql(),
+        latestReviewEventAt: latestReviewEventAtSql()
+      })
+      .from(products)
+      .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
+      .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
+      .where(and(...baseConditions))
+      .orderBy(
+        priorityRank,
+        desc(sql`coalesce(${latestReviewEventAtSql()}, ${products.updatedAt})`),
+        desc(products.id)
+      )
+      .offset(offset)
+      .limit(limit),
+    db
+      .select({ value: count() })
+      .from(products)
+      .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
+      .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
+      .where(and(...baseConditions))
+  ]);
+
+  return {
+    items: rows.map(summaryFromRow),
+    total: total.value,
+    offset,
+    limit
+  };
+}
+
+function reviewActivityLabel(
+  state: "pending" | "approved" | "changes_requested" | "revoked"
+) {
+  if (state === "pending") return "Pending review";
+  if (state === "approved") return "Approved";
+  if (state === "changes_requested") return "Changes requested";
+  return "Review revoked";
+}
+
+function reviewActivityAction(
+  state: "pending" | "approved" | "changes_requested" | "revoked"
+) {
+  if (state === "pending") return "Waiting on Ellie";
+  if (state === "approved") return "Download approved";
+  if (state === "changes_requested") return "Revise from feedback";
+  return "Edit scene direction";
+}
+
+export async function listReviewActivity(input: {
+  actor: ActorContext;
+  offset?: number;
+  limit?: number;
+}) {
+  const db = getDb();
+  const { offset, limit } = overviewWindow(input);
+  const eventAt = sql<Date>`coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt})`;
+  const [rows, [total]] = await Promise.all([
+    db
+      .select({
+        id: reviewRequests.id,
+        productId: reviewRequests.productId,
+        productName: reviewRequests.productName,
+        sku: reviewRequests.sku,
+        attemptNumber: reviewRequests.attemptNumber,
+        state: reviewRequests.state,
+        eventAt
+      })
+      .from(reviewRequests)
+      .where(eq(reviewRequests.workspaceId, input.actor.workspaceId))
+      .orderBy(desc(eventAt), desc(reviewRequests.id))
+      .offset(offset)
+      .limit(limit),
+    db
+      .select({ value: count() })
+      .from(reviewRequests)
+      .where(eq(reviewRequests.workspaceId, input.actor.workspaceId))
+  ]);
+
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      productId: row.productId,
+      productName: row.productName,
+      sku: row.sku,
+      attemptNumber: row.attemptNumber,
+      state: row.state,
+      statusLabel: reviewActivityLabel(row.state),
+      nextAction: reviewActivityAction(row.state),
+      eventAt: row.eventAt.toISOString()
+    })),
+    total: total.value,
+    offset,
+    limit
   };
 }
 
@@ -290,9 +489,11 @@ export async function getProduct(input: {
         id: activityEvents.id,
         type: activityEvents.eventType,
         data: activityEvents.eventDataJson,
+        actorDisplayName: users.displayName,
         createdAt: activityEvents.createdAt
       })
       .from(activityEvents)
+      .leftJoin(users, eq(users.id, activityEvents.actorId))
       .where(
         and(
           eq(activityEvents.workspaceId, input.actor.workspaceId),

@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { assets, jobs } from "@/db/schema";
+import { activityEvents, assets, jobs } from "@/db/schema";
 import { AppError } from "@/shared/errors";
 import { newId } from "@/shared/ids";
 import type { GenerationAttemptRecord, ProductGenerationInput } from "./domain";
@@ -155,6 +155,19 @@ export class PostgresGenerationRepository implements GenerationRepository {
           createdBy: input.actorId
         })
         .returning();
+      await tx.insert(activityEvents).values({
+        id: newId("event"),
+        workspaceId: input.workspaceId,
+        productId: input.product.productId,
+        actorType: "user",
+        actorId: input.actorId,
+        eventType: "generation.requested",
+        eventDataJson: {
+          attemptId,
+          attemptNumber: created.attemptNumber,
+          sceneVersion: created.sceneBriefVersion
+        }
+      });
       await tx.insert(jobs).values({
         id: newId("job"),
         type: "submit_generation",
@@ -233,6 +246,24 @@ export class PostgresGenerationRepository implements GenerationRepository {
           })
           .onConflictDoNothing({ target: jobs.deduplicationKey });
       }
+      if (
+        patch.status === "failed" ||
+        patch.status === "reconciliation_required"
+      ) {
+        await tx.insert(activityEvents).values({
+          id: newId("event"),
+          workspaceId: updated.workspaceId,
+          productId: updated.productId,
+          actorType: "worker",
+          actorId: null,
+          eventType: "generation.failed",
+          eventDataJson: {
+            attemptId: updated.id,
+            attemptNumber: updated.attemptNumber,
+            sceneVersion: updated.sceneBriefVersion
+          }
+        });
+      }
       return asRecord(updated);
     });
   }
@@ -287,6 +318,20 @@ export class PostgresGenerationRepository implements GenerationRepository {
           "Generation output was already finalized or is not ready to store.",
           409
         );
+      await tx.insert(activityEvents).values({
+        id: newId("event"),
+        workspaceId: attempt.workspaceId,
+        productId: attempt.productId,
+        actorType: "worker",
+        actorId: null,
+        eventType: "generation.completed",
+        eventDataJson: {
+          attemptId: attempt.id,
+          attemptNumber: attempt.attemptNumber,
+          sceneVersion: attempt.sceneBriefVersion,
+          assetId
+        }
+      });
       return asRecord(attempt);
     });
   }

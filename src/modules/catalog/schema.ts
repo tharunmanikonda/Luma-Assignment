@@ -14,6 +14,16 @@ import {
 import { assets, workspaces } from "@/db/schema/core";
 import { users } from "@/db/schema/auth";
 
+export type ImportOutcomeSummary = {
+  total: number;
+  valid: number;
+  invalid: number;
+  create: number;
+  update: number;
+  unchanged: number;
+  blocked: number;
+};
+
 export const ingestionBatchStatusEnum = pgEnum("ingestion_batch_status", [
   "uploaded",
   "validating",
@@ -120,6 +130,9 @@ export const ingestionBatches = pgTable(
     idempotencyKey: text("idempotency_key").notNull(),
     status: ingestionBatchStatusEnum("status").notNull().default("uploaded"),
     failureMessage: text("failure_message"),
+    outcomeSummaryJson: jsonb(
+      "outcome_summary_json"
+    ).$type<ImportOutcomeSummary>(),
     createdBy: varchar("created_by", { length: 40 })
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

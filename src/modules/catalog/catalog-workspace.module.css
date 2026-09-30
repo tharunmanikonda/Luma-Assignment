@@ -441,6 +441,7 @@
 
 .panelSection,
 .confirmBand,
+.importHistory,
 .sceneEditor,
 .generationPanel,
 .notes,
@@ -503,6 +504,44 @@
 .importCounts strong {
   color: #17211f;
   font-size: 18px;
+}
+
+.importHistoryRows {
+  display: grid;
+  gap: 6px;
+}
+
+.importHistoryRows button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e7e4;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 50px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.importHistoryRows button:hover,
+.importHistoryRows .activeImport {
+  border-color: #226351;
+}
+
+.importHistoryRows span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.importHistoryRows small,
+.importHistoryRows button > span:last-child {
+  color: #66736f;
+  font-size: 12px;
 }
 
 .previewRow {
@@ -1198,6 +1237,24 @@
 .activityList {
   display: grid;
   gap: 5px;
+  min-height: 231px;
+}
+.cardPager {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(70px, auto) 32px 32px;
+}
+.cardPager span {
+  color: #66736f;
+  font-size: 12px;
+  justify-self: end;
+  white-space: nowrap;
+}
+.cardPager .iconButton {
+  height: 32px;
+  min-height: 32px;
+  width: 32px;
 }
 .attentionRow {
   border: 1px solid #e2e7e4;
@@ -1291,6 +1348,7 @@
 }
 .panelSection,
 .confirmBand,
+.importHistory,
 .sceneEditor,
 .generationPanel,
 .notes,
@@ -1511,6 +1569,18 @@
 }
 .activityList small {
   color: #65716e;
+}
+.review_pending {
+  background: #d18a2d;
+}
+.review_approved {
+  background: #2c8a67;
+}
+.review_changes_requested {
+  background: #b05a45;
+}
+.review_revoked {
+  background: #7a6474;
 }
 .filters label {
   position: relative;

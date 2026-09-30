@@ -125,7 +125,10 @@ async function recordActivity(
     productId: string;
     actorId: string;
     eventType: string;
-    reviewId: string;
+    review: Pick<
+      ReviewRecord,
+      "id" | "attemptNumber" | "sceneVersion" | "state"
+    >;
   }
 ) {
   await client.query(
@@ -138,7 +141,12 @@ async function recordActivity(
       input.productId,
       input.actorId,
       input.eventType,
-      JSON.stringify({ reviewId: input.reviewId })
+      JSON.stringify({
+        reviewId: input.review.id,
+        attemptNumber: input.review.attemptNumber,
+        sceneVersion: input.review.sceneVersion,
+        state: input.review.state
+      })
     ]
   );
 }
@@ -287,7 +295,7 @@ export class PostgresReviewStore implements ReviewStore {
         productId: review.productId,
         actorId: command.createdBy,
         eventType: "review.created",
-        reviewId
+        review
       });
       return review;
     });
@@ -331,7 +339,7 @@ export class PostgresReviewStore implements ReviewStore {
         productId: review.productId,
         actorId: input.actorId,
         eventType: "review.revoked",
-        reviewId: review.id
+        review
       });
       return review;
     });
@@ -397,7 +405,7 @@ export class PostgresReviewStore implements ReviewStore {
           review.state === "approved"
             ? "review.approved"
             : "review.changes_requested",
-        reviewId: review.id
+        review
       });
       return review;
     });
@@ -406,7 +414,7 @@ export class PostgresReviewStore implements ReviewStore {
   async findAssigned(reviewId: string, approverUserId: string) {
     const result = await getPool().query(
       `select ${reviewColumns} from review_requests
-       where id = $1 and approver_user_id = $2`,
+       where id = $1 and approver_user_id = $2 and state <> 'revoked'`,
       [reviewId, approverUserId]
     );
     return firstReview(result.rows) ?? null;
@@ -415,7 +423,7 @@ export class PostgresReviewStore implements ReviewStore {
   async listAssigned(approverUserId: string) {
     const result = await getPool().query(
       `select ${reviewColumns} from review_requests
-       where approver_user_id = $1
+       where approver_user_id = $1 and state <> 'revoked'
        order by
          case state when 'pending' then 0 else 1 end,
          created_at desc,

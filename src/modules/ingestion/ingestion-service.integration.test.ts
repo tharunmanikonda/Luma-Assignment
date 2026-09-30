@@ -15,6 +15,7 @@ import {
   commitIngestionBatch,
   createIngestionBatch,
   getIngestionPreview,
+  listIngestionHistory,
   parseIngestionBatch
 } from "./ingestion-service";
 
@@ -126,7 +127,8 @@ describe.runIf(runDatabaseTests)(
         invalid: 0,
         create: 40,
         update: 0,
-        unchanged: 0
+        unchanged: 0,
+        blocked: 0
       });
 
       const committed = await commitIngestionBatch({
@@ -142,6 +144,7 @@ describe.runIf(runDatabaseTests)(
         await commitIngestionBatch({ actor: maya, batchId: first.id })
       ).toMatchObject({
         committed: 40,
+        created: 40,
         repeated: true
       });
 
@@ -205,12 +208,11 @@ describe.runIf(runDatabaseTests)(
         bytes: catalogBytes,
         objectStore
       });
-      await parseIngestionBatch(second.id, objectStore);
-      expect(
-        (await getIngestionPreview({ actor: maya, batchId: second.id })).counts
-          .unchanged
-      ).toBe(40);
-      await commitIngestionBatch({ actor: maya, batchId: second.id });
+      expect(second).toMatchObject({
+        id: first.id,
+        status: "committed",
+        fileDuplicate: true
+      });
       const [{ value: countAfterReimport }] = await getDb()
         .select({ value: count() })
         .from(products)
@@ -229,6 +231,19 @@ describe.runIf(runDatabaseTests)(
         unchangedProduct.updatedAt
       );
       expect(eventsAfterReimport).toBe(unchangedEventCount);
+      const history = await listIngestionHistory({ actor: maya });
+      expect(history.items[0]).toMatchObject({
+        id: first.id,
+        summary: {
+          total: 40,
+          valid: 40,
+          invalid: 0,
+          create: 40,
+          update: 0,
+          unchanged: 0,
+          blocked: 0
+        }
+      });
 
       const mayaDetail = await getProduct({
         actor: maya,

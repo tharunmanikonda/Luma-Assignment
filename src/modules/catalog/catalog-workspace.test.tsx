@@ -110,6 +110,22 @@ describe("CatalogWorkspace", () => {
             efficiency: { approvedPerAttempt: 0 }
           });
         }
+        if (url.startsWith("/api/products/overview/priority")) {
+          return jsonResponse({
+            items: [setupProduct],
+            total: 1,
+            offset: 0,
+            limit: 4
+          });
+        }
+        if (url.startsWith("/api/products/overview/reviews")) {
+          return jsonResponse({
+            items: [],
+            total: 0,
+            offset: 0,
+            limit: 4
+          });
+        }
         if (url.includes("status=ready_to_generate")) {
           return jsonResponse({
             products: [productSummary],
@@ -129,7 +145,9 @@ describe("CatalogWorkspace", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: /Linen Throw/ })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /Linen Throw/ })
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Ready\s*1/ }));
 
     await waitFor(() =>
@@ -377,6 +395,64 @@ describe("CatalogWorkspace", () => {
     ).toBeTruthy();
   });
 
+  it("renders meaningful lifecycle history labels instead of raw catalog fallbacks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `/api/products/${productSummary.id}`) {
+          return jsonResponse(
+            productDetail({
+              history: [
+                historyEvent("event_approved", "review.approved", {
+                  attemptNumber: 2,
+                  sceneVersion: 2
+                }),
+                historyEvent("event_sent", "review.created", {
+                  attemptNumber: 2,
+                  sceneVersion: 2
+                }),
+                historyEvent("event_generated", "generation.completed", {
+                  attemptNumber: 2,
+                  sceneVersion: 2
+                }),
+                historyEvent("event_requested", "generation.requested", {
+                  attemptNumber: 2,
+                  sceneVersion: 2
+                }),
+                historyEvent("event_scene", "scene_brief_saved", {
+                  version: 2
+                }),
+                historyEvent("event_revoked", "review.revoked", {
+                  attemptNumber: 1,
+                  sceneVersion: 1
+                }),
+                historyEvent("event_imported", "catalog_product_imported", {
+                  rowNumber: 24
+                })
+              ]
+            })
+          );
+        }
+        if (url.endsWith("/generation-attempts")) {
+          return jsonResponse({ attempts: [] });
+        }
+        return jsonResponse(emptyProductList());
+      })
+    );
+
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+
+    expect(await screen.findByText("Image 2 approved by Ellie")).toBeTruthy();
+    expect(screen.getByText("Image 2 sent to Ellie for review")).toBeTruthy();
+    expect(screen.getByText("Image 2 generated")).toBeTruthy();
+    expect(screen.getByText("Generation 2 requested/authorized")).toBeTruthy();
+    expect(screen.getByText("Scene direction 2 saved")).toBeTruthy();
+    expect(screen.getByText("Review for image 1 revoked")).toBeTruthy();
+    expect(screen.getByText("Product imported")).toBeTruthy();
+  });
+
   it("restores a generated candidate after the product panel is closed and reopened", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -530,6 +606,46 @@ describe("CatalogWorkspace", () => {
     expect(screen.getByRole("button", { name: "Generate image" })).toBeTruthy();
   });
 
+  it("keeps revoked generated images visible without exposing the old review link", async () => {
+    const revokedAttempt = successfulAttempt({
+      review: {
+        ...pendingReview(),
+        state: "revoked",
+        revokedAt: "2026-09-29T01:00:00.000Z"
+      }
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/generation-attempts")) {
+          return jsonResponse({ attempts: [revokedAttempt] });
+        }
+        if (url === `/api/products/${productSummary.id}`) {
+          return jsonResponse(productDetail());
+        }
+        return jsonResponse(emptyProductList());
+      })
+    );
+
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("row", { name: /Stoneware Mug.*HG-002/ }));
+
+    expect(await screen.findByText("Request revoked")).toBeTruthy();
+    expect(
+      screen.getByRole("img", {
+        name: "Stoneware Mug generated image 1"
+      })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Copy review link" })
+    ).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open review link" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Edit scene direction" })
+    ).toBeTruthy();
+  });
+
   it("lets Maya navigate, compare, and act on any generated candidate", async () => {
     const older = successfulAttempt({
       id: "attempt_1",
@@ -664,6 +780,16 @@ function successfulAttempt(overrides: Record<string, unknown> = {}) {
     failure: null,
     review: null,
     ...overrides
+  };
+}
+
+function historyEvent(id: string, type: string, data: Record<string, unknown>) {
+  return {
+    id,
+    type,
+    data,
+    actorDisplayName: type.startsWith("review.") ? "Ellie" : "Maya",
+    createdAt: "2026-09-29T01:00:00.000Z"
   };
 }
 

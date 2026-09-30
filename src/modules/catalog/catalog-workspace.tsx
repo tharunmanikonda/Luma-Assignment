@@ -11,6 +11,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Download,
   FileUp,
   ImageIcon,
@@ -42,6 +44,25 @@ type ProductList = {
   products: ProductSummary[];
   counts: { all: number; needs_setup: number; ready_to_generate: number };
   nextCursor: string | null;
+};
+
+type OverviewPage<T> = {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+type ReviewActivityItem = {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  attemptNumber: number;
+  state: "pending" | "approved" | "changes_requested" | "revoked";
+  statusLabel: string;
+  nextAction: string;
+  eventAt: string;
 };
 
 type UsageSummary = {
@@ -86,7 +107,13 @@ type ProductDetail = {
     downloadUrl: string;
     decidedAt: string | null;
   }>;
-  history: Array<{ id: string; type: string; createdAt: string }>;
+  history: Array<{
+    id: string;
+    type: string;
+    data: unknown;
+    actorDisplayName: string | null;
+    createdAt: string;
+  }>;
 };
 
 type GenerationQuote = {
@@ -144,6 +171,16 @@ type PreviewItem = {
   action: "create" | "update" | "unchanged" | "blocked";
 };
 
+type ImportCounts = {
+  total: number;
+  valid: number;
+  invalid: number;
+  create: number;
+  update: number;
+  unchanged: number;
+  blocked?: number;
+};
+
 type ImportPreview = {
   batch: {
     id: string;
@@ -156,18 +193,26 @@ type ImportPreview = {
       | "failed";
     failureMessage: string | null;
     filename: string | null;
+    outcomeSummary?: ImportCounts | null;
+    createdAt?: string;
+    committedAt?: string | null;
   };
-  counts: {
-    total: number;
-    valid: number;
-    invalid: number;
-    create: number;
-    update: number;
-    unchanged: number;
-  };
+  counts: ImportCounts;
   items: PreviewItem[];
   nextCursor: number | null;
 };
+
+type ImportHistoryItem = {
+  id: string;
+  status: ImportPreview["batch"]["status"];
+  failureMessage: string | null;
+  filename: string | null;
+  createdAt: string;
+  committedAt: string | null;
+  summary: ImportCounts | null;
+};
+
+type ImportHistoryPage = OverviewPage<ImportHistoryItem>;
 
 type ApiError = {
   error?: { message?: string; fieldErrors?: Record<string, string> };
@@ -198,12 +243,224 @@ function assetImageUrl(assetId: string, variant: "thumbnail" | "preview") {
   return `/api/assets/${encodeURIComponent(assetId)}/content?variant=${variant}`;
 }
 
+function importOutcomeText(counts: Partial<ImportCounts> | null | undefined) {
+  if (!counts) return "Summary pending";
+  const parts = [
+    `${counts.create ?? 0} new`,
+    `${counts.update ?? 0} updated`,
+    `${counts.unchanged ?? 0} unchanged`,
+    `${counts.blocked ?? counts.invalid ?? 0} blocked`
+  ];
+  return parts.join(" · ");
+}
+
+function importCommitMessage(result: {
+  created?: number;
+  updated?: number;
+  unchanged?: number;
+  invalid?: number;
+}) {
+  const parts: string[] = [];
+  if (result.created) {
+    parts.push(
+      `${result.created} product${result.created === 1 ? "" : "s"} added`
+    );
+  }
+  if (result.updated) {
+    parts.push(
+      `${result.updated} product${result.updated === 1 ? "" : "s"} updated`
+    );
+  }
+  if (result.unchanged) {
+    parts.push(`${result.unchanged} already up to date`);
+  }
+  if (result.invalid) {
+    parts.push(`${result.invalid} blocked`);
+  }
+  return parts.length ? `${parts.join("; ")}.` : "No changes were made.";
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "Not recorded";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
 function StatusBadge({ product }: { product: ProductSummary }) {
   return (
     <span className={`${styles.status} ${styles[product.status]}`}>
       <span>{product.statusLabel}</span>
     </span>
   );
+}
+
+function emptyOverviewPage<T>(offset = 0): OverviewPage<T> {
+  return { items: [], total: 0, offset, limit: 4 };
+}
+
+function normalizeOverviewPage<T>(
+  page: Partial<OverviewPage<T>>,
+  offset: number
+): OverviewPage<T> {
+  return {
+    items: Array.isArray(page.items) ? page.items : [],
+    total: Number.isFinite(page.total) ? page.total! : 0,
+    offset: Number.isFinite(page.offset) ? page.offset! : offset,
+    limit: Number.isFinite(page.limit) ? page.limit! : 4
+  };
+}
+
+function pageRange<T>(page: OverviewPage<T>) {
+  if (!page.total) return "0 of 0";
+  const first = page.offset + 1;
+  const last = Math.min(page.offset + page.items.length, page.total);
+  return `${first}–${last} of ${page.total}`;
+}
+
+function PagerControls<T>({
+  page,
+  loading,
+  onPage
+}: {
+  page: OverviewPage<T>;
+  loading: boolean;
+  onPage: (offset: number) => void;
+}) {
+  const previousOffset = Math.max(0, page.offset - page.limit);
+  const nextOffset = page.offset + page.limit;
+  const previousDisabled = loading || page.offset === 0;
+  const nextDisabled = loading || nextOffset >= page.total;
+  return (
+    <div className={styles.cardPager} aria-label="Card pagination">
+      <span aria-live="polite">{pageRange(page)}</span>
+      <button
+        type="button"
+        className={styles.iconButton}
+        aria-label="Previous page"
+        title="Previous page"
+        disabled={previousDisabled}
+        onClick={() => onPage(previousOffset)}
+      >
+        <ChevronLeft aria-hidden="true" size={16} />
+      </button>
+      <button
+        type="button"
+        className={styles.iconButton}
+        aria-label="Next page"
+        title="Next page"
+        disabled={nextDisabled}
+        onClick={() => onPage(nextOffset)}
+      >
+        <ChevronRight aria-hidden="true" size={16} />
+      </button>
+    </div>
+  );
+}
+
+type TimelineData = {
+  attemptNumber?: unknown;
+  sceneVersion?: unknown;
+  version?: unknown;
+  rowNumber?: unknown;
+};
+
+function timelineData(value: unknown): TimelineData {
+  return value && typeof value === "object" ? (value as TimelineData) : {};
+}
+
+function timelineLabel(event: ProductDetail["history"][number]) {
+  const data = timelineData(event.data);
+  const attempt =
+    typeof data.attemptNumber === "number" ? data.attemptNumber : null;
+  const scene =
+    typeof data.sceneVersion === "number"
+      ? data.sceneVersion
+      : typeof data.version === "number"
+        ? data.version
+        : null;
+  const actorSuffix = event.actorDisplayName
+    ? ` by ${event.actorDisplayName}`
+    : "";
+
+  switch (event.type) {
+    case "scene_brief_saved":
+      return {
+        title: scene
+          ? `Scene direction ${scene} saved`
+          : "Scene direction saved",
+        detail: actorSuffix ? `Saved${actorSuffix}` : "Saved"
+      };
+    case "generation.requested":
+      return {
+        title: attempt
+          ? `Generation ${attempt} requested/authorized`
+          : "Generation requested/authorized",
+        detail: scene ? `Scene direction ${scene}` : "Generation authorized"
+      };
+    case "generation.completed":
+      return {
+        title: attempt ? `Image ${attempt} generated` : "Image generated",
+        detail: scene ? `Scene direction ${scene}` : "Generation completed"
+      };
+    case "generation.failed":
+      return {
+        title: attempt ? `Generation ${attempt} failed` : "Generation failed",
+        detail: scene ? `Scene direction ${scene}` : "Generation needs review"
+      };
+    case "review.created":
+      return {
+        title: attempt
+          ? `Image ${attempt} sent to Ellie for review`
+          : "Image sent to Ellie for review",
+        detail: scene ? `Scene direction ${scene}` : "Review request sent"
+      };
+    case "review.approved":
+      return {
+        title: attempt
+          ? `Image ${attempt} approved${actorSuffix}`
+          : `Image approved${actorSuffix}`,
+        detail: scene ? `Scene direction ${scene}` : "Review approved"
+      };
+    case "review.changes_requested":
+      return {
+        title: attempt
+          ? `Changes requested for image ${attempt}${actorSuffix}`
+          : `Changes requested${actorSuffix}`,
+        detail: scene ? `Scene direction ${scene}` : "Review decision recorded"
+      };
+    case "review.revoked":
+      return {
+        title: attempt
+          ? `Review for image ${attempt} revoked`
+          : "Review request revoked",
+        detail: scene
+          ? `Scene direction ${scene}`
+          : "Ellie can no longer access it"
+      };
+    case "catalog_product_updated":
+      return {
+        title: "Catalog product updated",
+        detail:
+          typeof data.rowNumber === "number"
+            ? `Import row ${data.rowNumber}`
+            : "Imported product data changed"
+      };
+    case "catalog_product_imported":
+      return {
+        title: "Product imported",
+        detail:
+          typeof data.rowNumber === "number"
+            ? `Import row ${data.rowNumber}`
+            : "Catalog product created"
+      };
+    default:
+      return {
+        title: event.type.replaceAll("_", " ").replaceAll(".", " "),
+        detail: "Workflow event"
+      };
+  }
 }
 
 function ProductImage({
@@ -237,6 +494,9 @@ function ImportPanel({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [items, setItems] = useState<PreviewItem[]>([]);
+  const [history, setHistory] = useState<ImportHistoryPage>(emptyOverviewPage);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const uploadKey = useRef(crypto.randomUUID());
@@ -253,6 +513,30 @@ function ImportPanel({
     setItems((current) => (cursor ? [...current, ...next.items] : next.items));
     return next;
   }, []);
+
+  const loadHistory = useCallback(async (offset: number) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const params = new URLSearchParams({ offset: String(offset) });
+      const next = await readJson<ImportHistoryPage>(
+        await fetch(`/api/ingestion-batches?${params}`, { cache: "no-store" })
+      );
+      setHistory(normalizeOverviewPage(next, offset));
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : "Import history could not be loaded."
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHistory(0);
+  }, [loadHistory]);
 
   useEffect(() => {
     if (!preview || !["uploaded", "validating"].includes(preview.batch.status))
@@ -278,7 +562,23 @@ function ImportPanel({
           body
         })
       );
+      if ("fileDuplicate" in created) {
+        const duplicate = created as {
+          id: string;
+          status: ImportPreview["batch"]["status"];
+          fileDuplicate: true;
+          filename?: string | null;
+          committedAt?: string | null;
+          createdAt?: string | null;
+        };
+        setMessage(
+          duplicate.status === "committed"
+            ? `This exact file was imported on ${formatDateTime(duplicate.committedAt ?? duplicate.createdAt)}. No changes were made.`
+            : "This exact file is already in the import queue. No duplicate import was created."
+        );
+      }
       await loadPreview(created.id);
+      await loadHistory(0);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload failed.");
     } finally {
@@ -291,16 +591,21 @@ function ImportPanel({
     setBusy(true);
     setMessage(null);
     try {
-      const result = await readJson<{ committed: number; invalid: number }>(
+      const result = await readJson<{
+        committed: number;
+        created: number;
+        updated: number;
+        unchanged: number;
+        invalid: number;
+      }>(
         await fetch(`/api/ingestion-batches/${preview.batch.id}/commit`, {
           method: "POST",
           headers: { "Idempotency-Key": commitKey.current }
         })
       );
-      setMessage(
-        `${result.committed} products imported. ${result.invalid} blocked rows stayed unchanged.`
-      );
+      setMessage(importCommitMessage(result));
       await loadPreview(preview.batch.id);
+      await loadHistory(0);
       onCommitted();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Import failed.");
@@ -311,6 +616,7 @@ function ImportPanel({
 
   const processing =
     preview && ["uploaded", "validating"].includes(preview.batch.status);
+  const displayedCounts = preview?.batch.outcomeSummary ?? preview?.counts;
   return (
     <Panel title="Import catalog" onClose={onClose} size="compact">
       {!preview ? (
@@ -390,16 +696,19 @@ function ImportPanel({
             ) : null}
             <div className={styles.importCounts} aria-label="Import outcomes">
               <span>
-                <strong>{preview.counts.create}</strong> create
+                <strong>{displayedCounts?.create ?? 0}</strong> new
               </span>
               <span>
-                <strong>{preview.counts.update}</strong> update
+                <strong>{displayedCounts?.update ?? 0}</strong> update
               </span>
               <span>
-                <strong>{preview.counts.unchanged}</strong> unchanged
+                <strong>{displayedCounts?.unchanged ?? 0}</strong> unchanged
               </span>
               <span>
-                <strong>{preview.counts.invalid}</strong> blocked
+                <strong>
+                  {displayedCounts?.blocked ?? displayedCounts?.invalid ?? 0}
+                </strong>{" "}
+                blocked
               </span>
             </div>
           </section>
@@ -455,14 +764,19 @@ function ImportPanel({
                 </strong>
               </p>
               <p>
-                {preview.counts.valid} valid rows will be imported. Blocked rows
-                will remain unchanged.
+                {preview.counts.create} new, {preview.counts.update} updated,
+                and {preview.counts.unchanged} unchanged rows are ready. Blocked
+                rows will remain unchanged.
               </p>
               <div className={styles.actions}>
                 <button
                   className={styles.primaryButton}
                   onClick={commit}
-                  disabled={busy || preview.counts.valid === 0}
+                  disabled={
+                    busy ||
+                    preview.counts.valid === 0 ||
+                    (preview.counts.create === 0 && preview.counts.update === 0)
+                  }
                 >
                   {busy ? "Importing..." : "Import products"}
                 </button>
@@ -482,6 +796,48 @@ function ImportPanel({
           ) : null}
         </>
       )}
+      <section className={styles.importHistory}>
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Import history</p>
+            <h3>Recent imports</h3>
+          </div>
+          <PagerControls
+            page={history}
+            loading={historyLoading}
+            onPage={(offset) => void loadHistory(offset)}
+          />
+        </div>
+        {historyError ? <p className={styles.error}>{historyError}</p> : null}
+        {historyLoading && !history.items.length ? (
+          <p className={styles.notice}>Loading recent imports...</p>
+        ) : history.items.length ? (
+          <div className={styles.importHistoryRows}>
+            {history.items.map((entry) => (
+              <button
+                type="button"
+                key={entry.id}
+                className={
+                  preview?.batch.id === entry.id ? styles.activeImport : ""
+                }
+                onClick={() => void loadPreview(entry.id)}
+              >
+                <span>
+                  <strong>{entry.filename ?? "Catalog import"}</strong>
+                  <small>
+                    {entry.status === "committed"
+                      ? `Imported ${formatDateTime(entry.committedAt)}`
+                      : `${entry.status.replace("_", " ")} · ${formatDateTime(entry.createdAt)}`}
+                  </small>
+                </span>
+                <span>{importOutcomeText(entry.summary)}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.help}>Recent imports will appear here.</p>
+        )}
+      </section>
       {message ? (
         <p
           className={message.includes("failed") ? styles.error : styles.success}
@@ -1176,15 +1532,19 @@ function ProductPanel({
                     createdAt={selectedCandidate.review.createdAt}
                   />
                   <div className={styles.actions}>
-                    <button
-                      className={styles.secondaryButton}
-                      onClick={() =>
-                        void copyReviewLink(selectedCandidate.review!.reviewUrl)
-                      }
-                      disabled={reviewBusy}
-                    >
-                      Copy review link
-                    </button>
+                    {selectedCandidate.review.state !== "revoked" ? (
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={() =>
+                          void copyReviewLink(
+                            selectedCandidate.review!.reviewUrl
+                          )
+                        }
+                        disabled={reviewBusy}
+                      >
+                        Copy review link
+                      </button>
+                    ) : null}
                     {selectedCandidate.review.state === "pending" ? (
                       <button
                         className={styles.secondaryButton}
@@ -1209,6 +1569,20 @@ function ProductPanel({
                         }}
                       >
                         Revise scene from feedback
+                      </button>
+                    ) : null}
+                    {selectedCandidate.review.state === "revoked" ? (
+                      <button
+                        className={styles.primaryButton}
+                        onClick={() => {
+                          sceneInput.current?.focus();
+                          sceneInput.current?.scrollIntoView?.({
+                            behavior: "smooth",
+                            block: "center"
+                          });
+                        }}
+                      >
+                        Edit scene direction
                       </button>
                     ) : null}
                   </div>
@@ -1329,22 +1703,22 @@ function ProductPanel({
           <section className={styles.timeline}>
             <h3>History</h3>
             {product.history.length ? (
-              product.history.map((event) => (
-                <div key={event.id}>
-                  <span className={styles.timelineMark} />
-                  <p>
-                    <strong>
-                      {event.type === "scene_brief_saved"
-                        ? "Scene direction saved"
-                        : event.type === "catalog_product_updated"
-                          ? "Catalog updated"
-                          : "Catalog imported"}
-                    </strong>
-                    <br />
-                    <span>{new Date(event.createdAt).toLocaleString()}</span>
-                  </p>
-                </div>
-              ))
+              product.history.map((event) => {
+                const label = timelineLabel(event);
+                return (
+                  <div key={event.id}>
+                    <span className={styles.timelineMark} />
+                    <p>
+                      <strong>{label.title}</strong>
+                      <br />
+                      <span>
+                        {label.detail} ·{" "}
+                        {new Date(event.createdAt).toLocaleString()}
+                      </span>
+                    </p>
+                  </div>
+                );
+              })
             ) : (
               <p className={styles.help}>No activity yet.</p>
             )}
@@ -1449,6 +1823,10 @@ export function CatalogWorkspace({
 }) {
   const [data, setData] = useState(initialData);
   const [overview, setOverview] = useState(initialData);
+  const [priorityPage, setPriorityPage] =
+    useState<OverviewPage<ProductSummary>>(emptyOverviewPage);
+  const [reviewPage, setReviewPage] =
+    useState<OverviewPage<ReviewActivityItem>>(emptyOverviewPage);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<
@@ -1458,7 +1836,11 @@ export function CatalogWorkspace({
     { type: "import" } | { type: "product"; id: string } | null
   >(null);
   const [loading, setLoading] = useState(false);
+  const [priorityLoading, setPriorityLoading] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [priorityError, setPriorityError] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const refresh = useCallback(
     async (nextSearch = search, nextStatus = status) => {
@@ -1485,6 +1867,50 @@ export function CatalogWorkspace({
     [search, status]
   );
 
+  const loadPriorityPage = useCallback(async (offset: number) => {
+    setPriorityLoading(true);
+    setPriorityError(null);
+    try {
+      const params = new URLSearchParams({ offset: String(offset) });
+      const next = await readJson<OverviewPage<ProductSummary>>(
+        await fetch(`/api/products/overview/priority?${params}`, {
+          cache: "no-store"
+        })
+      );
+      setPriorityPage(normalizeOverviewPage(next, offset));
+    } catch (caught) {
+      setPriorityError(
+        caught instanceof Error
+          ? caught.message
+          : "Priority queue could not be loaded."
+      );
+    } finally {
+      setPriorityLoading(false);
+    }
+  }, []);
+
+  const loadReviewPage = useCallback(async (offset: number) => {
+    setReviewLoading(true);
+    setReviewError(null);
+    try {
+      const params = new URLSearchParams({ offset: String(offset) });
+      const next = await readJson<OverviewPage<ReviewActivityItem>>(
+        await fetch(`/api/products/overview/reviews?${params}`, {
+          cache: "no-store"
+        })
+      );
+      setReviewPage(normalizeOverviewPage(next, offset));
+    } catch (caught) {
+      setReviewError(
+        caught instanceof Error
+          ? caught.message
+          : "Review activity could not be loaded."
+      );
+    } finally {
+      setReviewLoading(false);
+    }
+  }, []);
+
   const refreshOverview = useCallback(async () => {
     try {
       const [nextOverview, nextUsage] = await Promise.all([
@@ -1500,7 +1926,23 @@ export function CatalogWorkspace({
     }
   }, []);
 
-  useEffect(() => void refreshOverview(), [refreshOverview]);
+  const refreshOperationalPages = useCallback(() => {
+    void refreshOverview();
+    void loadPriorityPage(priorityPage.offset);
+    void loadReviewPage(reviewPage.offset);
+  }, [
+    loadPriorityPage,
+    loadReviewPage,
+    priorityPage.offset,
+    refreshOverview,
+    reviewPage.offset
+  ]);
+
+  useEffect(() => {
+    void refreshOverview();
+    void loadPriorityPage(0);
+    void loadReviewPage(0);
+  }, [loadPriorityPage, loadReviewPage, refreshOverview]);
 
   async function loadMore() {
     if (!data.nextCursor) return;
@@ -1535,24 +1977,6 @@ export function CatalogWorkspace({
     return () => window.clearTimeout(timer);
   }, [search, status, refresh]);
 
-  const attention = useMemo(
-    () =>
-      overview.products
-        .filter((product) => product.status === "needs_setup")
-        .slice(0, 4),
-    [overview.products]
-  );
-  const reviewActivity = useMemo(
-    () =>
-      overview.products
-        .filter((product) =>
-          /Ellie|approved|changes/i.test(
-            `${product.statusLabel} ${product.nextAction}`
-          )
-        )
-        .slice(0, 4),
-    [overview.products]
-  );
   const progress = overview.counts.all
     ? Math.round(
         (overview.counts.ready_to_generate / overview.counts.all) * 100
@@ -1662,11 +2086,23 @@ export function CatalogWorkspace({
               <p className={styles.eyebrow}>Priority queue</p>
               <h2>Needs your attention</h2>
             </div>
-            <span>{attention.length} shown</span>
+            <PagerControls
+              page={priorityPage}
+              loading={priorityLoading}
+              onPage={(offset) => void loadPriorityPage(offset)}
+            />
           </div>
-          {attention.length ? (
+          {priorityError ? (
+            <div className={styles.emptyBand}>
+              <p>{priorityError}</p>
+            </div>
+          ) : priorityLoading && !priorityPage.items.length ? (
+            <div className={styles.emptyBand}>
+              <p>Loading priority work...</p>
+            </div>
+          ) : priorityPage.items.length ? (
             <div className={styles.attentionList}>
-              {attention.map((product) => (
+              {priorityPage.items.map((product) => (
                 <button
                   className={styles.attentionRow}
                   key={product.id}
@@ -1676,21 +2112,16 @@ export function CatalogWorkspace({
                   <span className={styles.productIdentity}>
                     <strong>{product.name}</strong>
                     <small>
-                      {product.sku} ·{" "}
-                      {product.sourceStatus === "failed"
-                        ? "Source photo needs attention"
-                        : product.sceneSummary
-                          ? "Source photo is still preparing"
-                          : "Add scene direction"}
+                      {product.sku} · {product.statusLabel}
                     </small>
                   </span>
-                  <span className={styles.rowAction}>Finish setup</span>
+                  <span className={styles.rowAction}>{product.nextAction}</span>
                 </button>
               ))}
             </div>
           ) : (
             <div className={styles.emptyBand}>
-              <p>No products need setup in this view.</p>
+              <p>No products need action right now.</p>
             </div>
           )}
         </div>
@@ -1700,19 +2131,38 @@ export function CatalogWorkspace({
               <p className={styles.eyebrow}>Review activity</p>
               <h2>Ellie&apos;s decisions</h2>
             </div>
-            <span>{reviewActivity.length} recent</span>
+            <PagerControls
+              page={reviewPage}
+              loading={reviewLoading}
+              onPage={(offset) => void loadReviewPage(offset)}
+            />
           </div>
-          {reviewActivity.length ? (
+          {reviewError ? (
+            <div className={styles.emptyBand}>
+              <p>{reviewError}</p>
+            </div>
+          ) : reviewLoading && !reviewPage.items.length ? (
+            <div className={styles.emptyBand}>
+              <p>Loading review activity...</p>
+            </div>
+          ) : reviewPage.items.length ? (
             <div className={styles.activityList}>
-              {reviewActivity.map((product) => (
+              {reviewPage.items.map((activity) => (
                 <button
-                  key={product.id}
-                  onClick={() => setPanel({ type: "product", id: product.id })}
+                  key={activity.id}
+                  onClick={() =>
+                    setPanel({ type: "product", id: activity.productId })
+                  }
                 >
-                  <span className={styles.metricDot} />
+                  <span
+                    className={`${styles.metricDot} ${styles[`review_${activity.state}`]}`}
+                  />
                   <span>
-                    <strong>{product.name}</strong>
-                    <small>{product.statusLabel}</small>
+                    <strong>{activity.productName}</strong>
+                    <small>
+                      {activity.statusLabel} · {activity.sku} · Image{" "}
+                      {activity.attemptNumber}
+                    </small>
                   </span>
                   <ArrowRight aria-hidden="true" size={16} />
                 </button>
@@ -1856,7 +2306,7 @@ export function CatalogWorkspace({
           onClose={() => setPanel(null)}
           onCommitted={() => {
             void refresh();
-            void refreshOverview();
+            refreshOperationalPages();
           }}
         />
       ) : null}
@@ -1866,7 +2316,7 @@ export function CatalogWorkspace({
           onClose={() => setPanel(null)}
           onSaved={() => {
             void refresh();
-            void refreshOverview();
+            refreshOperationalPages();
           }}
         />
       ) : null}

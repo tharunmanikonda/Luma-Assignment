@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, max } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, max } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { activityEvents, assets, jobs } from "@/db/schema";
 import type { ObjectStore } from "@/infrastructure/storage/object-store";
@@ -9,6 +9,7 @@ import {
   ingestionItems,
   products,
   sceneBriefs,
+  type ImportOutcomeSummary,
   type IngestionRowError
 } from "@/modules/catalog/schema";
 import { AppError } from "@/shared/errors";
@@ -73,6 +74,37 @@ function comparableProduct(row: NormalizedCatalogRow) {
     currency: row.currency,
     notes: row.notes
   };
+}
+
+function emptySummary(): ImportOutcomeSummary {
+  return {
+    total: 0,
+    valid: 0,
+    invalid: 0,
+    create: 0,
+    update: 0,
+    unchanged: 0,
+    blocked: 0
+  };
+}
+
+function summarizeActions(actions: PreviewAction[]): ImportOutcomeSummary {
+  const summary = emptySummary();
+  summary.total = actions.length;
+  for (const action of actions) {
+    if (action === "blocked") {
+      summary.invalid += 1;
+      summary.blocked += 1;
+    } else {
+      summary.valid += 1;
+      summary[action] += 1;
+    }
+  }
+  return summary;
+}
+
+function publicSummary(summary: ImportOutcomeSummary | null) {
+  return summary ?? emptySummary();
 }
 
 export function isCatalogRowUnchanged(
@@ -144,6 +176,43 @@ export async function createIngestionBatch(input: {
       );
     }
     return { id: existing.id, status: existing.status, repeated: true };
+  }
+
+  const [sameFile] = await db
+    .select({
+      id: ingestionBatches.id,
+      status: ingestionBatches.status,
+      filename: assets.filename,
+      createdAt: ingestionBatches.createdAt,
+      committedAt: ingestionBatches.committedAt
+    })
+    .from(ingestionBatches)
+    .innerJoin(assets, eq(assets.id, ingestionBatches.sourceAssetId))
+    .where(
+      and(
+        eq(ingestionBatches.workspaceId, input.actor.workspaceId),
+        eq(assets.checksum, digest),
+        inArray(ingestionBatches.status, [
+          "uploaded",
+          "validating",
+          "ready",
+          "committing",
+          "committed"
+        ])
+      )
+    )
+    .orderBy(desc(ingestionBatches.createdAt))
+    .limit(1);
+  if (sameFile) {
+    return {
+      id: sameFile.id,
+      status: sameFile.status,
+      repeated: false,
+      fileDuplicate: true,
+      filename: sameFile.filename,
+      createdAt: sameFile.createdAt.toISOString(),
+      committedAt: sameFile.committedAt?.toISOString() ?? null
+    };
   }
 
   const batchId = newId("batch");
@@ -221,6 +290,7 @@ export async function parseIngestionBatch(
   const [batch] = await db
     .select({
       id: ingestionBatches.id,
+      workspaceId: ingestionBatches.workspaceId,
       status: ingestionBatches.status,
       objectKey: assets.objectKey
     })
@@ -285,6 +355,11 @@ export async function parseIngestionBatch(
         .set({ status: "ready", failureMessage: null })
         .where(eq(ingestionBatches.id, batchId));
     });
+    const summary = await computeOutcomeSummary(batch.workspaceId, batchId);
+    await db
+      .update(ingestionBatches)
+      .set({ outcomeSummaryJson: summary })
+      .where(eq(ingestionBatches.id, batchId));
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "CSV validation failed.";
@@ -339,6 +414,35 @@ function itemOutcome(
   };
 }
 
+async function computeOutcomeSummary(workspaceId: string, batchId: string) {
+  const allItems = await getDb()
+    .select()
+    .from(ingestionItems)
+    .where(eq(ingestionItems.batchId, batchId))
+    .orderBy(asc(ingestionItems.sourceRowNumber));
+  const normalizedRows = allItems
+    .filter((item) => !item.validationErrorsJson.length)
+    .map(
+      (item) =>
+        normalizeCatalogRow(item.rawDataJson as CatalogRawRow).normalized
+    )
+    .filter((row): row is NormalizedCatalogRow => Boolean(row));
+  const existingBySku = await existingProductsForRows(
+    workspaceId,
+    normalizedRows.map((row) => row.sku)
+  );
+  return summarizeActions(
+    allItems.map(
+      (item) =>
+        itemOutcome(
+          item.rawDataJson as CatalogRawRow,
+          item.validationErrorsJson,
+          existingBySku
+        ).action
+    )
+  );
+}
+
 export async function getIngestionPreview(input: {
   actor: ActorContext;
   batchId: string;
@@ -350,6 +454,7 @@ export async function getIngestionPreview(input: {
       id: ingestionBatches.id,
       status: ingestionBatches.status,
       failureMessage: ingestionBatches.failureMessage,
+      outcomeSummary: ingestionBatches.outcomeSummaryJson,
       filename: assets.filename,
       createdAt: ingestionBatches.createdAt,
       committedAt: ingestionBatches.committedAt
@@ -390,6 +495,7 @@ export async function getIngestionPreview(input: {
       existingBySku
     )
   }));
+  const summary = summarizeActions(outcomes.map(({ action }) => action));
   const cursor = input.cursor ?? 0;
   const page = outcomes
     .filter(({ item }) => (item.sourceRowNumber ?? 0) > cursor)
@@ -400,12 +506,13 @@ export async function getIngestionPreview(input: {
   return {
     batch,
     counts: {
-      total: outcomes.length,
-      valid: outcomes.filter(({ action }) => action !== "blocked").length,
-      invalid: outcomes.filter(({ action }) => action === "blocked").length,
-      create: outcomes.filter(({ action }) => action === "create").length,
-      update: outcomes.filter(({ action }) => action === "update").length,
-      unchanged: outcomes.filter(({ action }) => action === "unchanged").length
+      total: summary.total,
+      valid: summary.valid,
+      invalid: summary.invalid,
+      create: summary.create,
+      update: summary.update,
+      unchanged: summary.unchanged,
+      blocked: summary.blocked
     },
     items: page.map(({ item, action, normalized }) => ({
       id: item.id,
@@ -416,6 +523,53 @@ export async function getIngestionPreview(input: {
       normalized
     })),
     nextCursor
+  };
+}
+
+export async function listIngestionHistory(input: {
+  actor: ActorContext;
+  offset?: number;
+  limit?: number;
+}) {
+  const offset = Math.max(0, Math.trunc(input.offset ?? 0));
+  const limit = Math.min(10, Math.max(1, Math.trunc(input.limit ?? 5)));
+  const db = getDb();
+  const [rows, [total]] = await Promise.all([
+    db
+      .select({
+        id: ingestionBatches.id,
+        status: ingestionBatches.status,
+        failureMessage: ingestionBatches.failureMessage,
+        outcomeSummary: ingestionBatches.outcomeSummaryJson,
+        filename: assets.filename,
+        createdAt: ingestionBatches.createdAt,
+        committedAt: ingestionBatches.committedAt
+      })
+      .from(ingestionBatches)
+      .innerJoin(assets, eq(assets.id, ingestionBatches.sourceAssetId))
+      .where(eq(ingestionBatches.workspaceId, input.actor.workspaceId))
+      .orderBy(desc(ingestionBatches.createdAt), desc(ingestionBatches.id))
+      .offset(offset)
+      .limit(limit),
+    db
+      .select({ value: count() })
+      .from(ingestionBatches)
+      .where(eq(ingestionBatches.workspaceId, input.actor.workspaceId))
+  ]);
+
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      failureMessage: row.failureMessage,
+      filename: row.filename,
+      createdAt: row.createdAt.toISOString(),
+      committedAt: row.committedAt?.toISOString() ?? null,
+      summary: row.outcomeSummary
+    })),
+    total: total.value,
+    offset,
+    limit
   };
 }
 
@@ -444,12 +598,16 @@ export async function commitIngestionBatch(input: {
       .where(eq(ingestionItems.batchId, batch.id))
       .orderBy(asc(ingestionItems.sourceRowNumber));
     if (batch.status === "committed") {
+      const summary = publicSummary(batch.outcomeSummaryJson);
       return {
         batchId: batch.id,
         status: batch.status,
-        committed: items.filter((item) => item.productId).length,
-        invalid: items.filter((item) => item.validationErrorsJson.length)
-          .length,
+        committed: summary.valid,
+        created: summary.create,
+        updated: summary.update,
+        unchanged: summary.unchanged,
+        invalid: summary.invalid,
+        summary,
         repeated: true
       };
     }
@@ -466,13 +624,23 @@ export async function commitIngestionBatch(input: {
       .set({ status: "committing" })
       .where(eq(ingestionBatches.id, batch.id));
 
-    let committed = 0;
+    const summary = emptySummary();
+    summary.total = items.length;
     for (const item of items) {
-      if (item.validationErrorsJson.length) continue;
+      if (item.validationErrorsJson.length) {
+        summary.invalid += 1;
+        summary.blocked += 1;
+        continue;
+      }
       const normalized = normalizeCatalogRow(
         item.rawDataJson as CatalogRawRow
       ).normalized;
-      if (!normalized) continue;
+      if (!normalized) {
+        summary.invalid += 1;
+        summary.blocked += 1;
+        continue;
+      }
+      summary.valid += 1;
 
       const [existing] = await tx
         .select()
@@ -517,7 +685,7 @@ export async function commitIngestionBatch(input: {
           .update(ingestionItems)
           .set({ productId })
           .where(eq(ingestionItems.id, item.id));
-        committed += 1;
+        summary.unchanged += 1;
         continue;
       }
 
@@ -587,6 +755,11 @@ export async function commitIngestionBatch(input: {
         .update(ingestionItems)
         .set({ productId })
         .where(eq(ingestionItems.id, item.id));
+      if (existing) {
+        summary.update += 1;
+      } else {
+        summary.create += 1;
+      }
       await tx.insert(activityEvents).values({
         id: newId("event"),
         workspaceId: input.actor.workspaceId,
@@ -598,18 +771,25 @@ export async function commitIngestionBatch(input: {
           : "catalog_product_imported",
         eventDataJson: { batchId: batch.id, rowNumber: item.sourceRowNumber }
       });
-      committed += 1;
     }
 
     await tx
       .update(ingestionBatches)
-      .set({ status: "committed", committedAt: new Date() })
+      .set({
+        status: "committed",
+        committedAt: new Date(),
+        outcomeSummaryJson: summary
+      })
       .where(eq(ingestionBatches.id, batch.id));
     return {
       batchId: batch.id,
       status: "committed" as const,
-      committed,
-      invalid: items.filter((item) => item.validationErrorsJson.length).length,
+      committed: summary.valid,
+      created: summary.create,
+      updated: summary.update,
+      unchanged: summary.unchanged,
+      invalid: summary.invalid,
+      summary,
       repeated: false
     };
   });

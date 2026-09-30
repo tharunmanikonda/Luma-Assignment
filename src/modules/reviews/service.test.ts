@@ -174,13 +174,17 @@ class MemoryReviewStore implements ReviewStore {
 
   async findAssigned(reviewId: string, approverUserId: string) {
     return reviewId === this.review.id &&
-      approverUserId === this.review.approverUserId
+      approverUserId === this.review.approverUserId &&
+      this.review.state !== "revoked"
       ? this.review
       : null;
   }
 
   async listAssigned(approverUserId: string) {
-    return approverUserId === this.review.approverUserId ? [this.review] : [];
+    return approverUserId === this.review.approverUserId &&
+      this.review.state !== "revoked"
+      ? [this.review]
+      : [];
   }
 
   async findForOperator(reviewId: string, workspaceId: string) {
@@ -405,7 +409,7 @@ describe("ReviewService", () => {
     });
   });
 
-  it("revokes only pending reviews and preserves a read-only record", async () => {
+  it("revokes pending reviews and removes Ellie access while preserving Maya audit access", async () => {
     const { service } = setup();
     const input = {
       actor: maya,
@@ -414,14 +418,22 @@ describe("ReviewService", () => {
     };
     const revoked = await service.revokeReview(input);
     const repeated = await service.revokeReview(input);
-    const read = await service.readAssignedReview({
-      actor: ellie,
-      reviewId: "review_1"
-    });
 
     expect(revoked).toEqual(repeated);
-    expect(read.state).toBe("revoked");
-    expect(read.canDecide).toBe(false);
+    await expect(
+      service.readAssignedReview({
+        actor: ellie,
+        reviewId: "review_1"
+      })
+    ).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+    await expect(
+      service.listAssignedReviews({ actor: ellie })
+    ).resolves.toEqual([]);
+    await expect(
+      service.readOperatorStatus({ actor: maya, reviewId: "review_1" })
+    ).resolves.toEqual(
+      expect.objectContaining({ id: "review_1", state: "revoked" })
+    );
   });
 
   it("exposes feedback as a causal revision context without generating", async () => {
