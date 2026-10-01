@@ -408,7 +408,10 @@ export async function listReviewActivity(input: {
 }) {
   const db = getDb();
   const { offset, limit } = overviewWindow(input);
-  const eventAt = sql<Date>`coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt})`;
+  const eventAt =
+    sql<Date>`coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt})`.mapWith(
+      reviewRequests.createdAt
+    );
   const [total] = await db
     .select({ value: count() })
     .from(reviewRequests)

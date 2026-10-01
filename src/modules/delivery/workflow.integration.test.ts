@@ -7,7 +7,10 @@ import type {
   ObjectStore,
   StoredObject
 } from "@/infrastructure/storage/object-store";
-import { getProduct } from "@/modules/catalog/catalog-service";
+import {
+  getProduct,
+  listReviewActivity
+} from "@/modules/catalog/catalog-service";
 import { products, sceneBriefs } from "@/modules/catalog/schema";
 import { PostgresGenerationRepository } from "@/modules/generation/postgres-repository";
 import { GenerationService } from "@/modules/generation/service";
@@ -340,6 +343,27 @@ describe.runIf(runDatabaseTests)(
           }
         ]
       });
+      const reviewActivity = await listReviewActivity({ actor: maya });
+      expect(reviewActivity).toMatchObject({
+        total: 2,
+        items: [
+          {
+            id: secondReview.id,
+            state: "approved",
+            eventAt: expect.any(String)
+          },
+          {
+            id: firstReview.id,
+            state: "changes_requested",
+            eventAt: expect.any(String)
+          }
+        ]
+      });
+      expect(
+        reviewActivity.items.every((item) =>
+          Number.isFinite(Date.parse(item.eventAt))
+        )
+      ).toBe(true);
 
       const approved = await delivery.approvedDownload({
         workspaceId: maya.workspaceId,
