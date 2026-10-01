@@ -140,6 +140,14 @@ describe.runIf(runDatabaseTests)(
         invalid: 0,
         repeated: false
       });
+      const committedPreview = await getIngestionPreview({
+        actor: maya,
+        batchId: first.id
+      });
+      expect(committedPreview.counts).toEqual(preview.counts);
+      expect(
+        committedPreview.items.every((item) => item.action === "create")
+      ).toBe(true);
       expect(
         await commitIngestionBatch({ actor: maya, batchId: first.id })
       ).toMatchObject({

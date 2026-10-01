@@ -24,6 +24,8 @@ export type ImportOutcomeSummary = {
   blocked: number;
 };
 
+export type ImportOutcomeAction = "create" | "update" | "unchanged" | "blocked";
+
 export const ingestionBatchStatusEnum = pgEnum("ingestion_batch_status", [
   "uploaded",
   "validating",
@@ -173,6 +175,7 @@ export const ingestionItems = pgTable(
       .$type<IngestionRowError[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    outcomeAction: text("outcome_action").$type<ImportOutcomeAction>(),
     productId: varchar("product_id", { length: 40 }).references(
       () => products.id,
       { onDelete: "restrict" }

@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   ilike,
+  inArray,
   lt,
   or,
   sql,
@@ -44,6 +45,15 @@ function overviewWindow(input: { offset?: number; limit?: number }) {
     Math.max(1, Math.trunc(input.limit ?? overviewPageSize))
   );
   return { offset, limit };
+}
+
+export function clampOverviewOffset(
+  total: number,
+  offset: number,
+  limit: number
+) {
+  if (total <= 0) return 0;
+  return Math.min(offset, Math.floor((total - 1) / limit) * limit);
 }
 
 function latestReviewStateSql() {
@@ -322,54 +332,53 @@ export async function listPriorityQueue(input: {
     eq(products.workspaceId, input.actor.workspaceId),
     priorityCondition
   ];
-  const [rows, [total]] = await Promise.all([
-    db
-      .select({
-        id: products.id,
-        sku: products.sku,
-        name: products.name,
-        category: products.category,
-        updatedAt: products.updatedAt,
-        sourceAssetId: assets.id,
-        sourceStatus: assets.status,
-        sceneText: sceneBriefs.text,
-        sceneVersion: sceneBriefs.version,
-        attempts: sql<number>`(
+  const [total] = await db
+    .select({ value: count() })
+    .from(products)
+    .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
+    .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
+    .where(and(...baseConditions));
+  const safeOffset = clampOverviewOffset(total.value, offset, limit);
+  const rows = await db
+    .select({
+      id: products.id,
+      sku: products.sku,
+      name: products.name,
+      category: products.category,
+      updatedAt: products.updatedAt,
+      sourceAssetId: assets.id,
+      sourceStatus: assets.status,
+      sceneText: sceneBriefs.text,
+      sceneVersion: sceneBriefs.version,
+      attempts: sql<number>`(
           select count(*)::int from ${generationAttempts}
           where ${generationAttempts.productId} = ${products.id}
         )`,
-        activeAttempts: sql<number>`(
+      activeAttempts: sql<number>`(
           select count(*)::int from ${generationAttempts}
           where ${generationAttempts.productId} = ${products.id}
             and ${generationAttempts.status} in ('pending', 'submitting', 'queued', 'processing', 'storing')
         )`,
-        latestReviewState: latestReviewStateSql(),
-        latestReviewSceneVersion: latestReviewSceneVersionSql(),
-        latestReviewEventAt: latestReviewEventAtSql()
-      })
-      .from(products)
-      .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
-      .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
-      .where(and(...baseConditions))
-      .orderBy(
-        priorityRank,
-        desc(sql`coalesce(${latestReviewEventAtSql()}, ${products.updatedAt})`),
-        desc(products.id)
-      )
-      .offset(offset)
-      .limit(limit),
-    db
-      .select({ value: count() })
-      .from(products)
-      .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
-      .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
-      .where(and(...baseConditions))
-  ]);
+      latestReviewState: latestReviewStateSql(),
+      latestReviewSceneVersion: latestReviewSceneVersionSql(),
+      latestReviewEventAt: latestReviewEventAtSql()
+    })
+    .from(products)
+    .leftJoin(assets, eq(assets.id, products.currentSourceAssetId))
+    .leftJoin(sceneBriefs, eq(sceneBriefs.id, products.currentSceneBriefId))
+    .where(and(...baseConditions))
+    .orderBy(
+      priorityRank,
+      desc(sql`coalesce(${latestReviewEventAtSql()}, ${products.updatedAt})`),
+      desc(products.id)
+    )
+    .offset(safeOffset)
+    .limit(limit);
 
   return {
     items: rows.map(summaryFromRow),
     total: total.value,
-    offset,
+    offset: safeOffset,
     limit
   };
 }
@@ -400,27 +409,26 @@ export async function listReviewActivity(input: {
   const db = getDb();
   const { offset, limit } = overviewWindow(input);
   const eventAt = sql<Date>`coalesce(${reviewRequests.revokedAt}, ${reviewRequests.decidedAt}, ${reviewRequests.createdAt})`;
-  const [rows, [total]] = await Promise.all([
-    db
-      .select({
-        id: reviewRequests.id,
-        productId: reviewRequests.productId,
-        productName: reviewRequests.productName,
-        sku: reviewRequests.sku,
-        attemptNumber: reviewRequests.attemptNumber,
-        state: reviewRequests.state,
-        eventAt
-      })
-      .from(reviewRequests)
-      .where(eq(reviewRequests.workspaceId, input.actor.workspaceId))
-      .orderBy(desc(eventAt), desc(reviewRequests.id))
-      .offset(offset)
-      .limit(limit),
-    db
-      .select({ value: count() })
-      .from(reviewRequests)
-      .where(eq(reviewRequests.workspaceId, input.actor.workspaceId))
-  ]);
+  const [total] = await db
+    .select({ value: count() })
+    .from(reviewRequests)
+    .where(eq(reviewRequests.workspaceId, input.actor.workspaceId));
+  const safeOffset = clampOverviewOffset(total.value, offset, limit);
+  const rows = await db
+    .select({
+      id: reviewRequests.id,
+      productId: reviewRequests.productId,
+      productName: reviewRequests.productName,
+      sku: reviewRequests.sku,
+      attemptNumber: reviewRequests.attemptNumber,
+      state: reviewRequests.state,
+      eventAt
+    })
+    .from(reviewRequests)
+    .where(eq(reviewRequests.workspaceId, input.actor.workspaceId))
+    .orderBy(desc(eventAt), desc(reviewRequests.id))
+    .offset(safeOffset)
+    .limit(limit);
 
   return {
     items: rows.map((row) => ({
@@ -435,9 +443,173 @@ export async function listReviewActivity(input: {
       eventAt: row.eventAt.toISOString()
     })),
     total: total.value,
-    offset,
+    offset: safeOffset,
     limit
   };
+}
+
+type ProductHistoryEvent = {
+  id: string;
+  type: string;
+  data: unknown;
+  actorDisplayName: string | null;
+  createdAt: Date;
+};
+
+type ProductHistoryAttempt = {
+  id: string;
+  attemptNumber: number;
+  sceneVersion: number;
+  status: string;
+  createdBy: string;
+  createdAt: Date;
+  completedAt: Date | null;
+  updatedAt: Date;
+};
+
+type ProductHistoryReview = {
+  id: string;
+  attemptNumber: number;
+  sceneVersion: number;
+  state: "pending" | "approved" | "changes_requested" | "revoked";
+  createdBy: string;
+  decisionActorId: string | null;
+  createdAt: Date;
+  decidedAt: Date | null;
+  revokedAt: Date | null;
+};
+
+function eventIdentity(type: string, data: unknown) {
+  if (!data || typeof data !== "object") return null;
+  const values = data as Record<string, unknown>;
+  const entityId = type.startsWith("generation.")
+    ? values.attemptId
+    : type.startsWith("review.")
+      ? values.reviewId
+      : null;
+  return typeof entityId === "string" ? `${type}:${entityId}` : null;
+}
+
+function eventData(data: unknown) {
+  return data && typeof data === "object"
+    ? (data as Record<string, unknown>)
+    : {};
+}
+
+export function mergeProductHistory(input: {
+  activity: ProductHistoryEvent[];
+  attempts: ProductHistoryAttempt[];
+  reviews: ProductHistoryReview[];
+  userNames: Map<string, string>;
+}) {
+  const imported = input.activity
+    .filter((event) => event.type === "catalog_product_imported")
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+    .at(0);
+  const events = input.activity.filter(
+    (event) => event.type !== "catalog_product_imported"
+  );
+  if (imported) events.push(imported);
+
+  const eventsByIdentity = new Map<string, ProductHistoryEvent>();
+  for (const event of events) {
+    const identity = eventIdentity(event.type, event.data);
+    if (identity) eventsByIdentity.set(identity, event);
+  }
+  const addCanonical = (event: ProductHistoryEvent) => {
+    const identity = eventIdentity(event.type, event.data);
+    const existing = identity ? eventsByIdentity.get(identity) : null;
+    if (existing) {
+      existing.data = {
+        ...eventData(event.data),
+        ...eventData(existing.data)
+      };
+      existing.actorDisplayName ??= event.actorDisplayName;
+      return;
+    }
+    if (identity) eventsByIdentity.set(identity, event);
+    events.push(event);
+  };
+
+  for (const attempt of input.attempts) {
+    const data = {
+      attemptId: attempt.id,
+      attemptNumber: attempt.attemptNumber,
+      sceneVersion: attempt.sceneVersion
+    };
+    addCanonical({
+      id: `canonical:generation.requested:${attempt.id}`,
+      type: "generation.requested",
+      data,
+      actorDisplayName: input.userNames.get(attempt.createdBy) ?? null,
+      createdAt: attempt.createdAt
+    });
+    if (attempt.status === "succeeded" && attempt.completedAt) {
+      addCanonical({
+        id: `canonical:generation.completed:${attempt.id}`,
+        type: "generation.completed",
+        data,
+        actorDisplayName: null,
+        createdAt: attempt.completedAt
+      });
+    } else if (
+      attempt.status === "failed" ||
+      attempt.status === "reconciliation_required"
+    ) {
+      addCanonical({
+        id: `canonical:generation.failed:${attempt.id}`,
+        type: "generation.failed",
+        data,
+        actorDisplayName: null,
+        createdAt: attempt.completedAt ?? attempt.updatedAt
+      });
+    }
+  }
+
+  for (const review of input.reviews) {
+    const data = {
+      reviewId: review.id,
+      attemptNumber: review.attemptNumber,
+      sceneVersion: review.sceneVersion,
+      state: review.state
+    };
+    addCanonical({
+      id: `canonical:review.created:${review.id}`,
+      type: "review.created",
+      data,
+      actorDisplayName: input.userNames.get(review.createdBy) ?? null,
+      createdAt: review.createdAt
+    });
+    if (review.state === "revoked" && review.revokedAt) {
+      addCanonical({
+        id: `canonical:review.revoked:${review.id}`,
+        type: "review.revoked",
+        data,
+        actorDisplayName: null,
+        createdAt: review.revokedAt
+      });
+    } else if (
+      (review.state === "approved" || review.state === "changes_requested") &&
+      review.decidedAt
+    ) {
+      addCanonical({
+        id: `canonical:review.${review.state}:${review.id}`,
+        type:
+          review.state === "approved"
+            ? "review.approved"
+            : "review.changes_requested",
+        data,
+        actorDisplayName: review.decisionActorId
+          ? (input.userNames.get(review.decisionActorId) ?? null)
+          : null,
+        createdAt: review.decidedAt
+      });
+    }
+  }
+
+  return events
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+    .slice(0, 50);
 }
 
 export async function getProduct(input: {
@@ -483,7 +655,7 @@ export async function getProduct(input: {
     sourceStatus: row.sourceStatus,
     sceneText: row.sceneText
   });
-  const [history, approvedOutputs] = await Promise.all([
+  const [activity, attempts, reviews] = await Promise.all([
     db
       .select({
         id: activityEvents.id,
@@ -501,23 +673,76 @@ export async function getProduct(input: {
         )
       )
       .orderBy(desc(activityEvents.createdAt))
-      .limit(20),
+      .limit(100),
     db
       .select({
-        assetId: reviewRequests.candidateAssetId,
+        id: generationAttempts.id,
+        attemptNumber: generationAttempts.attemptNumber,
+        sceneVersion: generationAttempts.sceneBriefVersion,
+        status: generationAttempts.status,
+        createdBy: generationAttempts.createdBy,
+        createdAt: generationAttempts.createdAt,
+        completedAt: generationAttempts.completedAt,
+        updatedAt: generationAttempts.updatedAt
+      })
+      .from(generationAttempts)
+      .where(
+        and(
+          eq(generationAttempts.workspaceId, input.actor.workspaceId),
+          eq(generationAttempts.productId, input.productId)
+        )
+      )
+      .orderBy(
+        desc(generationAttempts.attemptNumber),
+        desc(generationAttempts.id)
+      ),
+    db
+      .select({
+        id: reviewRequests.id,
+        candidateAssetId: reviewRequests.candidateAssetId,
         attemptNumber: reviewRequests.attemptNumber,
-        decidedAt: reviewRequests.decidedAt
+        sceneVersion: reviewRequests.sceneVersion,
+        state: reviewRequests.state,
+        createdBy: reviewRequests.createdBy,
+        decisionActorId: reviewRequests.decisionActorId,
+        createdAt: reviewRequests.createdAt,
+        decidedAt: reviewRequests.decidedAt,
+        revokedAt: reviewRequests.revokedAt
       })
       .from(reviewRequests)
       .where(
         and(
           eq(reviewRequests.workspaceId, input.actor.workspaceId),
-          eq(reviewRequests.productId, input.productId),
-          eq(reviewRequests.state, "approved")
+          eq(reviewRequests.productId, input.productId)
         )
       )
       .orderBy(desc(reviewRequests.attemptNumber), desc(reviewRequests.id))
   ]);
+  const actorIds = Array.from(
+    new Set([
+      ...attempts.map((attempt) => attempt.createdBy),
+      ...reviews.flatMap((review) =>
+        [review.createdBy, review.decisionActorId].filter((id): id is string =>
+          Boolean(id)
+        )
+      )
+    ])
+  );
+  const actorRows = actorIds.length
+    ? await db
+        .select({ id: users.id, name: users.displayName })
+        .from(users)
+        .where(inArray(users.id, actorIds))
+    : [];
+  const history = mergeProductHistory({
+    activity,
+    attempts,
+    reviews,
+    userNames: new Map(actorRows.map((actor) => [actor.id, actor.name]))
+  });
+  const approvedOutputs = reviews.filter(
+    (review) => review.state === "approved"
+  );
 
   return {
     ...row,
@@ -526,12 +751,13 @@ export async function getProduct(input: {
     status,
     statusLabel: statusLabels[status],
     readyToGenerate: status === "ready_to_generate",
-    approvedCount: 0,
-    attempts: 0,
+    approvedCount: approvedOutputs.length,
+    attempts: attempts.length,
     approvedOutputs: approvedOutputs.map((output) => ({
-      ...output,
-      imageUrl: `/api/assets/${encodeURIComponent(output.assetId)}/content`,
-      downloadUrl: `/api/assets/${encodeURIComponent(output.assetId)}/download`,
+      assetId: output.candidateAssetId,
+      attemptNumber: output.attemptNumber,
+      imageUrl: `/api/assets/${encodeURIComponent(output.candidateAssetId)}/content`,
+      downloadUrl: `/api/assets/${encodeURIComponent(output.candidateAssetId)}/download`,
       decidedAt: output.decidedAt?.toISOString() ?? null
     })),
     history: history.map((event) => ({

@@ -15,6 +15,13 @@
       "when": 1790787600000,
       "tag": "0001_import_outcome_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790812800000,
+      "tag": "0002_import_item_outcome",
+      "breakpoints": true
     }
   ]
 }

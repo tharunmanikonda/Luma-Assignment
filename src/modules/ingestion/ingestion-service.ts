@@ -355,7 +355,10 @@ export async function parseIngestionBatch(
         .set({ status: "ready", failureMessage: null })
         .where(eq(ingestionBatches.id, batchId));
     });
-    const summary = await computeOutcomeSummary(batch.workspaceId, batchId);
+    const summary = await computeAndPersistOutcomeSnapshot(
+      batch.workspaceId,
+      batchId
+    );
     await db
       .update(ingestionBatches)
       .set({ outcomeSummaryJson: summary })
@@ -414,8 +417,12 @@ function itemOutcome(
   };
 }
 
-async function computeOutcomeSummary(workspaceId: string, batchId: string) {
-  const allItems = await getDb()
+async function computeAndPersistOutcomeSnapshot(
+  workspaceId: string,
+  batchId: string
+) {
+  const db = getDb();
+  const allItems = await db
     .select()
     .from(ingestionItems)
     .where(eq(ingestionItems.batchId, batchId))
@@ -431,16 +438,23 @@ async function computeOutcomeSummary(workspaceId: string, batchId: string) {
     workspaceId,
     normalizedRows.map((row) => row.sku)
   );
-  return summarizeActions(
-    allItems.map(
-      (item) =>
-        itemOutcome(
-          item.rawDataJson as CatalogRawRow,
-          item.validationErrorsJson,
-          existingBySku
-        ).action
-    )
-  );
+  const outcomes = allItems.map((item) => ({
+    id: item.id,
+    action: itemOutcome(
+      item.rawDataJson as CatalogRawRow,
+      item.validationErrorsJson,
+      existingBySku
+    ).action
+  }));
+  await db.transaction(async (tx) => {
+    for (const outcome of outcomes) {
+      await tx
+        .update(ingestionItems)
+        .set({ outcomeAction: outcome.action })
+        .where(eq(ingestionItems.id, outcome.id));
+    }
+  });
+  return summarizeActions(outcomes.map(({ action }) => action));
 }
 
 export async function getIngestionPreview(input: {
@@ -487,14 +501,18 @@ export async function getIngestionPreview(input: {
     normalizedRows.map((row) => row.sku)
   );
 
-  const outcomes = allItems.map((item) => ({
-    item,
-    ...itemOutcome(
+  const outcomes = allItems.map((item) => {
+    const current = itemOutcome(
       item.rawDataJson as CatalogRawRow,
       item.validationErrorsJson,
       existingBySku
-    )
-  }));
+    );
+    return {
+      item,
+      ...current,
+      action: item.outcomeAction ?? current.action
+    };
+  });
   const summary = summarizeActions(outcomes.map(({ action }) => action));
   const cursor = input.cursor ?? 0;
   const page = outcomes
@@ -630,6 +648,10 @@ export async function commitIngestionBatch(input: {
       if (item.validationErrorsJson.length) {
         summary.invalid += 1;
         summary.blocked += 1;
+        await tx
+          .update(ingestionItems)
+          .set({ outcomeAction: "blocked" })
+          .where(eq(ingestionItems.id, item.id));
         continue;
       }
       const normalized = normalizeCatalogRow(
@@ -638,6 +660,10 @@ export async function commitIngestionBatch(input: {
       if (!normalized) {
         summary.invalid += 1;
         summary.blocked += 1;
+        await tx
+          .update(ingestionItems)
+          .set({ outcomeAction: "blocked" })
+          .where(eq(ingestionItems.id, item.id));
         continue;
       }
       summary.valid += 1;
@@ -683,7 +709,7 @@ export async function commitIngestionBatch(input: {
       ) {
         await tx
           .update(ingestionItems)
-          .set({ productId })
+          .set({ productId, outcomeAction: "unchanged" })
           .where(eq(ingestionItems.id, item.id));
         summary.unchanged += 1;
         continue;
@@ -753,7 +779,10 @@ export async function commitIngestionBatch(input: {
 
       await tx
         .update(ingestionItems)
-        .set({ productId })
+        .set({
+          productId,
+          outcomeAction: existing ? "update" : "create"
+        })
         .where(eq(ingestionItems.id, item.id));
       if (existing) {
         summary.update += 1;
